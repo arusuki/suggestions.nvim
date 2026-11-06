@@ -5,10 +5,10 @@ Tests use isolated zsh startup/history files and never execute user commands.
 """
 
 import os
-from pathlib import Path
 import tempfile
 import time
 import unittest
+from pathlib import Path
 
 import pynvim
 
@@ -19,6 +19,7 @@ class Integration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory(prefix="suggestions-tests-")
+        cls.addClassCleanup(cls.temp.cleanup)
         cls.folder = Path(cls.temp.name)
         cls.cwd = cls.folder / "workspace"
         cls.cwd.mkdir()
@@ -38,6 +39,11 @@ class Integration(unittest.TestCase):
             ": 1700000002:0;echo 中文 history\n",
             encoding="utf-8",
         )
+        # Ubuntu's /etc/zsh/zshrc runs compinit before our .zshrc. Its
+        # permission prompt can block an unattended PTY on runner images.
+        (cls.folder / ".zshenv").write_text(
+            "skip_global_compinit=1\n", encoding="utf-8"
+        )
         (cls.folder / ".zshrc").write_text(
             "autoload -Uz compinit; compinit -i -D\n"
             "alias gst='git status'\n"
@@ -49,6 +55,7 @@ class Integration(unittest.TestCase):
             encoding="utf-8",
         )
         cls.old_log = os.environ.get("NVIM_LOG_FILE")
+        cls.addClassCleanup(cls.restore_log_env)
         os.environ["NVIM_LOG_FILE"] = str(cls.folder / "nvim.log")
         cls.nvim = pynvim.attach(
             "child",
@@ -63,6 +70,7 @@ class Integration(unittest.TestCase):
                 "NONE",
             ],
         )
+        cls.addClassCleanup(cls.close_nvim)
         cls.nvim.ui_attach(100, 32, rgb=True, ext_linegrid=True)
         cls.nvim.exec_lua("vim.opt.runtimepath:prepend(...)", str(ROOT))
         cls.nvim.command("cd " + cls.nvim.funcs.fnameescape(str(cls.cwd)))
@@ -78,12 +86,12 @@ class Integration(unittest.TestCase):
             str(cls.folder / "history"),
         )
         cls.nvim.input(":!git che")
-        cls.wait_for(lambda: cls.current().get("items"), "zsh startup")
+        cls.wait_for(lambda: cls.current().get("items"), "zsh startup", timeout=8)
         cls.nvim.input("<Esc>")
         cls.wait_for(lambda: not cls.inspect().get("current"), "initial close")
 
     @classmethod
-    def tearDownClass(cls):
+    def close_nvim(cls):
         try:
             if cls.nvim.api.get_mode()["mode"] != "n":
                 cls.nvim.input("<C-c>")
@@ -91,11 +99,13 @@ class Integration(unittest.TestCase):
         except (EOFError, OSError):
             pass
         cls.nvim.close()
+
+    @classmethod
+    def restore_log_env(cls):
         if cls.old_log is None:
             os.environ.pop("NVIM_LOG_FILE", None)
         else:
             os.environ["NVIM_LOG_FILE"] = cls.old_log
-        cls.temp.cleanup()
 
     @classmethod
     def inspect(cls):
@@ -173,10 +183,14 @@ class Integration(unittest.TestCase):
         return result.get("items", [])
 
     def test_native_git_and_right_accept(self):
-        self.enter(":!git che", "checkout")
-        self.assertEqual(self.current()["ghost"], "ckout ")
+        # `git che` also matches check-attr/check-ignore on some zsh versions.
+        self.enter(":!git checko", "checkout")
+        # ZLE's trailing-space behavior also varies; preserve its exact result.
+        expected = self.current()["items"][0]["text"]
+        self.assertEqual(expected.rstrip(), "!git checkout")
+        self.assertEqual(self.current()["ghost"], expected[len("!git checko") :])
         self.key("<Right>")
-        self.assertEqual(self.line(), "!git checkout ")
+        self.assertEqual(self.line(), expected)
 
     def test_multiple_native_matches(self):
         items = self.backend("ls ")

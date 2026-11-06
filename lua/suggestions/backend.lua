@@ -225,6 +225,7 @@ function M.status()
     pending = state.pending ~= nil,
     history = #state.history,
     error = state.last_error,
+    startup_output = not state.ready and state.output or nil,
   }
 end
 
