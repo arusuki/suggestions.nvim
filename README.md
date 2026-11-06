@@ -1,84 +1,85 @@
 # suggestions.nvim
 
-把 Neovim 命令行变成从编辑器底部展开的 minibuffer。普通 Ex 命令和 `:!` 都支持 fish 风格的历史灰字预测；输入 `:!` 时，由真正的 **zsh / ZLE** 提供补全。
+English | [简体中文](README.zh-CN.md)
 
-![真实 Neovim UI 输出](assets/demo.gif)
+Turn Neovim's command line into a minibuffer that expands from the bottom of the editor. Both ordinary Ex commands and `:!` get fish-style history suggestions; shell completion comes from a real **zsh / ZLE** session.
 
-全宽贴底、无外框、主题自适应；输入行固定在最底部，候选向上展开。面板通过 `cmdheight` 预留空间，编辑区随高度变化收缩，退出后恢复原布局。光标使用实际终端光标。
+![Actual Neovim UI output](assets/demo.gif)
 
-## 快速试用
+The drawer spans the editor width, has no outer frame, and adapts to your theme. Input stays on the bottom row while candidates expand upward. It reserves space with `cmdheight`, restores the layout on close, and uses the actual terminal cursor.
 
-需要 **Neovim 0.11+、zsh 5.8+**，适用于 macOS / Linux。插件运行时没有第三方 Lua、Python 或 tmux 依赖。
+## Quick start
 
-在这个项目目录运行：
+Requires **Neovim 0.11+ and zsh 5.8+** on macOS or Linux. The plugin has no third-party Lua, Python, or tmux runtime dependencies.
+
+Try it from this repository:
 
 ```sh
 nvim -u ./minimal.lua
 ```
 
-按 `:`，输入 `!git st`、`!cd ~/` 或 `!ls `。灰字优先来自 zsh 历史，没有历史匹配时使用第一个可延伸当前输入的补全。按右方向键采纳。
+Press `:` and type `!git st`, `!cd ~/`, or `!ls `. Ghost text prefers zsh history, then the first completion that extends your input. Press Right to accept it.
 
-普通命令也可试试 `:set nu` 或 `:edit al`：灰字优先使用 Neovim `:` 历史中最近一条能延伸当前输入的命令，否则使用第一条能延伸输入的原生补全。与输入相同或需要改写前文的候选会被跳过；Tab 显式选中后，以选中项为准。
+For Ex commands, try `:set nu` or `:edit al`. The most recent matching Neovim `:` history entry takes priority, followed by native completion. Candidates that equal the input or rewrite its prefix are skipped for automatic ghost text. An explicit Tab selection takes priority.
 
-使用 lazy.nvim 加载本地项目：
+Install with lazy.nvim:
 
 ```lua
 {
-  dir = vim.fn.expand("~/dev/suggestions.nvim"),
-  name = "suggestions.nvim",
+  "arusuki/suggestions.nvim",
   lazy = false,
   opts = {},
 }
 ```
 
-直接安装到 `pack/*/start` 或已加入 `runtimepath` 时：
+For a local checkout, replace the repository string with `dir = vim.fn.expand("~/dev/suggestions.nvim")`. If installed under `pack/*/start` or already on `runtimepath`, call:
 
 ```lua
 require("suggestions").setup()
 ```
 
-## 交互
+## Interaction
 
-| 按键 | 行为 |
+| Key | Behavior |
 | --- | --- |
-| `→` | 行末采纳灰字；有显式选中候选时采纳该项；否则移动光标 |
-| `Alt-f` | 按词采纳灰字；否则向前移动一个词 |
-| `Alt-b` | 向后移动一个词 |
-| `Tab` / `Shift-Tab` | 选择下一个 / 上一个候选，循环选择 |
-| `↑` / `↓` | 按输入前缀翻阅 zsh 历史；选中候选后改为移动选择 |
-| `Enter` | 确认显式选中的候选；没有选择时执行当前输入 |
-| `Ctrl-a` / `Ctrl-e` | 行首 / 行尾；行末有灰字时 `Ctrl-e` 采纳它 |
-| `Ctrl-k` | 删除光标到行尾的内容 |
-| `Ctrl-u` / `Ctrl-w` | Neovim 原生的向前删行 / 删词 |
-| `Esc` / `Ctrl-c` | 取消命令，收起面板 |
+| `→` | Accept an explicit selection or ghost text at the end of the line; otherwise move right |
+| `Alt-f` | Accept one word of ghost text; otherwise move forward one word |
+| `Alt-b` | Move backward one word |
+| `Tab` / `Shift-Tab` | Cycle forward / backward through candidates |
+| `↑` / `↓` | Browse prefix-matched zsh history; move through candidates after an explicit selection |
+| `Enter` | Confirm an explicit selection; otherwise execute the current input |
+| `Ctrl-a` / `Ctrl-e` | Move to the beginning / end; at the end, `Ctrl-e` accepts ghost text |
+| `Ctrl-k` | Delete from the cursor to the end |
+| `Ctrl-u` / `Ctrl-w` | Keep Neovim's native backward line / word deletion |
+| `Esc` / `Ctrl-c` | Cancel the command and close the drawer |
 
-自动出现的候选不会被预选。输入完整命令后，直接回车即可执行，未采纳的灰字不会被执行。
+Automatically displayed candidates are not preselected. Enter executes only the current input; unaccepted ghost text is never executed.
 
-普通 Ex 命令使用 Neovim 原生补全上下文，包括文件、选项、Lua 和用户命令。`:%s`、可视选区范围、搜索、寄存器插入、`Ctrl-r =` 嵌套表达式和原生执行语义仍由 Neovim 处理。搜索及其他提示框也使用同一面板，但不请求 zsh 补全。
+Ex commands use Neovim's native completion contexts, including files, options, Lua, and user commands. Neovim still handles `:%s`, visual ranges, search, register insertion, nested `Ctrl-r =` expressions, and execution. Search and other prompts use the drawer without requesting zsh completion.
 
-灰字只在非空命令的行末显示，搜索和嵌套表达式提示不显示灰字。Ex 历史直接使用 Neovim 已加载的历史（含 ShaDa 和当前会话），遵循 `'history'` 设置和原生历史删除操作；多行历史不用于灰字。未选中候选时，Ex 的 `↑` / `↓` 保留原生历史导航。设置 `completion.auto = false` 后，Ex 历史灰字仍会显示，补全需按 Tab 请求。
+Ghost text appears only at the end of a nonempty command, never in search or nested expression prompts. Ex history uses Neovim's loaded history, including ShaDa and the current session, respects `'history'` and native history deletion, and skips multiline entries. Without an explicit selection, Ex Up/Down retain native history navigation. With `completion.auto = false`, Ex history suggestions still appear; press Tab to request completion.
 
-`!cmd`、`2,4!cmd`、`read !cmd`、`write !cmd` 可使用 zsh 补全。候选保留 zsh 生成的引号、空格转义、目录斜杠和光标右侧文本；补全以发起命令的窗口工作目录为准，支持 `:lcd`。
+Shell completion supports `!cmd`, `2,4!cmd`, `read !cmd`, and `write !cmd`. Candidates preserve zsh's quoting, escaped spaces, directory slashes, and text to the right of the cursor. Completion uses the originating window's working directory, including `:lcd`.
 
-## 配置
+## Configuration
 
 ```lua
 require("suggestions").setup({
   enabled = true,
   ui = {
     max_height = 10,
-    max_ratio = 0.35,  -- 同时限制为屏幕高度的 35%
+    max_ratio = 0.35,  -- Also cap the drawer at 35% of screen height.
     min_height = 3,
     padding = 2,
     separator = "─",
   },
   completion = {
-    auto = true,      -- false：按 Tab 后请求补全
+    auto = true,      -- false: request completion with Tab.
     debounce_ms = 70,
     max_results = 80,
   },
   zsh = {
-    shell = "zsh",    -- 也可使用绝对路径
+    shell = "zsh",    -- An absolute path also works.
     timeout_ms = 1800,
     startup_timeout_ms = 6000,
     history_limit = 3000,
@@ -88,44 +89,57 @@ require("suggestions").setup({
   keys = {
     accept = "<Right>",
     accept_word = "<M-f>",
-    -- word_left = false, -- false 禁用某个插件映射
+    -- word_left = false, -- Disable an individual plugin mapping.
   },
 })
 ```
 
-默认读取交互式 zsh 的启动配置，所以已有 `compinit`、`compdef`、aliases 和 `fpath` 可直接使用。没有初始化补全时，后端使用 `compinit -i -D` 初始化。历史路径优先取 `history_file`，否则使用 zsh 配置里的 `$HISTFILE`，最后回退到 `~/.zsh_history`。历史在后端启动时加载，当前 Neovim 会话中提交的 shell 命令追加到内存；不会改写终端历史文件。
+The worker loads interactive zsh startup files, so your existing `compinit`, `compdef`, aliases, and `fpath` are available. If completion has not been initialized, it runs `compinit -i -D`. See the [zsh completion system documentation](https://zsh.sourceforge.io/Doc/Release/Completion-System.html) for these configuration mechanisms.
 
-补全后端与执行后端分开：**`:!` 仍由 Neovim 原生执行，使用 `&shell` 和 `&shellcmdflag`**。如果希望执行也加载同一份交互式 zsh 配置，例如使用 aliases，可在自己的配置中设置：
+History comes from `history_file`, then the shell's `$HISTFILE`, then `~/.zsh_history`. It is read when the worker starts. Shell commands submitted in the current Neovim session stay in memory; the plugin does not rewrite your terminal history file.
+
+**Completion and execution are separate.** Neovim still executes `:!` using [`shell` and `shellcmdflag`](https://neovim.io/doc/user/options.html#'shellcmdflag'). To load interactive zsh configuration for execution as well, for example to use aliases, configure:
 
 ```lua
 vim.opt.shell = vim.fn.exepath("zsh")
 vim.opt.shellcmdflag = "-ic"
 ```
 
-这仍是 `:!` 的一次性命令执行，不是持久化终端会话；`!cd` 不改变 Neovim 的目录。交互式 TUI 程序使用 `:terminal`。
+Each `:!` is still a separate command execution, not a persistent terminal session. `!cd` does not change Neovim's directory. Use `:terminal` for interactive TUI programs.
 
-可覆盖以下高亮组：`SuggestionsNormal`、`SuggestionsMuted`、`SuggestionsGhost`、`SuggestionsBorder`、`SuggestionsAccent`、`SuggestionsSelection`。默认配色取自当前主题，并在 `ColorScheme` 后重新适配。
+Override these highlight groups to customize the appearance: `SuggestionsNormal`, `SuggestionsMuted`, `SuggestionsGhost`, `SuggestionsBorder`, `SuggestionsAccent`, and `SuggestionsSelection`. Defaults follow the current theme and refresh on `ColorScheme`.
 
-## 管理与兼容
+## Commands and compatibility
 
 - `:SuggestionsEnable` / `:SuggestionsDisable` / `:SuggestionsToggle`
+- `:SuggestionsReload` — reread zsh configuration and disk history; Lua API: `require("suggestions").reload()`
 - `:checkhealth suggestions`
-- `:lua vim.print(require("suggestions").inspect())` 查看当前状态、后端错误和请求状态
+- `:lua vim.print(require("suggestions").inspect())` — inspect UI state, backend errors, startup output, and pending requests
 
-不要同时启用多个命令行渲染器。使用 Noice 时关闭其 `cmdline`；使用 wilder 或 cmp-cmdline 时关闭它们的命令行补全 / 渲染。普通 Insert 模式的补全插件不受影响。关闭插件会恢复被覆盖的命令行映射及 `cmdheight`，并结束后台 zsh。
+After editing `compdef`, aliases, `fpath`, or completion functions in `.zshrc`, run:
 
-zsh 缺失、启动超时或补全超时时，面板会显示后端不可用，Ex 命令和原生执行仍可使用。下次请求会重启后端。耗时的 `.zshrc` 或补全函数可通过对应 timeout 选项调整。
+```vim
+:SuggestionsReload
+```
 
-界面是单行命令输入，长输入随光标水平滚动。暂不显示 zsh 候选的描述列，也不做跨终端实时历史同步。Neovim 的 `vim.ui_attach` 和 `nvim__redraw` 仍属于实验 API；兼容性由集成测试覆盖。
+Reload immediately restarts the zsh worker while keeping plugin options, mappings, current input, and shell history from this Neovim session. It discards old completion requests and candidates. With automatic completion enabled, it completes the active input again. Reload does nothing while the plugin is disabled. Startup is asynchronous; inspect backend state for errors.
 
-## 实现与验证
+The worker is a separate interactive, non-login zsh. Following [zsh's startup rules](https://zsh.sourceforge.io/Doc/Release/Files.html), it normally reads `.zshenv` and `.zshrc`, respects `$ZDOTDIR`, and does not automatically read `.zprofile` or `.zlogin`. Functions and aliases defined only in another running terminal are not synchronized. The plugin owns the completion menu and key bindings, resets some shell options, and clears `precmd_functions`, `preexec_functions`, and `chpwd_functions`; terminal Tab behavior is not reproduced in every detail.
 
-参考 [terminal_mate.nvim 的后台 zsh 思路](https://github.com/beardnick/terminal_mate.nvim/blob/main/lua/terminal_mate/zsh_completion.lua)，这里独立实现了面向原生命令行的后端与 UI：
+Use one command-line renderer at a time. Disable Noice's `cmdline` and any wilder or cmp-cmdline completion/rendering integration. Insert-mode completion is separate. Disabling suggestions.nvim restores overridden mappings and `cmdheight`, and stops the worker.
 
-- `vim.ui_attach(ext_cmdline)` 接管显示，输入、解析和执行仍保留在原生 command-line mode。
-- 持久 PTY 中的 zsh 使用 `vared` 和 ZLE completion widget 运行真实补全；逐项读取 ZLE 插入结果，而非重新拼接 shell token。
-- 命令文本通过私有目录内的 NUL 分隔文件传递，不作为 PTY 按键或 `eval` 代码发送。补全函数本身仍会像终端补全一样运行其所需的程序。
-- 防抖、请求串行化和版本校验避免旧结果覆盖新输入；超时、退出及禁用会清理进程和临时文件。
+If zsh is missing or startup/completion times out, the drawer reports the backend as unavailable while Ex commands and native execution remain usable. The next request retries startup. Increase the relevant timeout for slow `.zshrc` files or completion functions.
+
+Input is single-line and scrolls horizontally with the cursor. Completion descriptions and live history synchronization across terminals are not supported. Neovim's `vim.ui_attach` and `nvim__redraw` APIs are experimental; integration tests cover compatibility.
+
+## Implementation and testing
+
+Inspired by [terminal_mate.nvim's background zsh approach](https://github.com/beardnick/terminal_mate.nvim/blob/main/lua/terminal_mate/zsh_completion.lua), this plugin independently implements a backend and UI for Neovim's native command line:
+
+- `vim.ui_attach(ext_cmdline)` handles display while native command-line mode retains input, parsing, and execution.
+- A persistent PTY runs zsh with `vared` and a ZLE completion widget. Candidates are read from ZLE's actual insertion results rather than reconstructed shell tokens.
+- Request text travels through NUL-delimited files in a private directory, not as PTY keystrokes or `eval` code. Completion functions can still run helper programs, as they do in a terminal.
+- Debouncing, serialized requests, and generation checks prevent stale results from replacing current input. Timeouts, process exit, and disabling clean up the worker and temporary files.
 
 ```sh
 python3 -m venv .venv
@@ -134,6 +148,13 @@ python3 -m venv .venv
 .venv/bin/python tests/preview.py
 ```
 
-测试连接真实 Neovim UI 和真实 zsh，覆盖路径引号、中文光标、多个候选、自定义补全、shell / Ex 历史灰字、补全兜底、取消、过期请求、超时恢复、布局及屏幕光标。`tests/preview.py` 从 Neovim 实际 `ext_linegrid` 输出生成暗色 / 亮色预览与 GIF。
+Tests connect to real Neovim UI and zsh instances. They cover quoting, Unicode cursors, multiple candidates, custom completion, shell/Ex history suggestions, completion fallback, cancellation, stale requests, timeout recovery, configuration reload, layout, and screen cursor placement. `tests/preview.py` renders dark/light previews and a GIF from Neovim's actual `ext_linegrid` output.
 
-MIT License.
+## References and credits
+
+- [terminal_mate.nvim](https://github.com/beardnick/terminal_mate.nvim) — inspiration for the background zsh completion approach; see the implementation link above.
+- [Zsh startup files](https://zsh.sourceforge.io/Doc/Release/Files.html) — startup order and `ZDOTDIR`.
+- [Zsh completion system](https://zsh.sourceforge.io/Doc/Release/Completion-System.html) — `compinit`, `compdef`, and `fpath`.
+- [Neovim shell options](https://neovim.io/doc/user/options.html#'shellcmdflag') — command execution through `shell` / `shellcmdflag`.
+
+[MIT License](LICENSE).

@@ -73,6 +73,7 @@ class Integration(unittest.TestCase):
         cls.addClassCleanup(cls.close_nvim)
         cls.nvim.ui_attach(100, 32, rgb=True, ext_linegrid=True)
         cls.nvim.exec_lua("vim.opt.runtimepath:prepend(...)", str(ROOT))
+        cls.nvim.command("runtime plugin/suggestions.lua")
         cls.nvim.command("cd " + cls.nvim.funcs.fnameescape(str(cls.cwd)))
         cls.nvim.options["cmdheight"] = 0
         cls.nvim.exec_lua(
@@ -507,6 +508,68 @@ class Integration(unittest.TestCase):
         finally:
             self.key("<Esc>")
             self.nvim.command("lcd " + self.nvim.funcs.fnameescape(str(self.cwd)))
+
+    def test_reload_reads_config_and_history(self):
+        rc = self.folder / ".zshrc"
+        history = self.folder / "history"
+        old_rc, old_history = rc.read_text(), history.read_text()
+        mapping = self.nvim.funcs.maparg("<Tab>", "c", False, True)
+        self.assertEqual(len(self.backend("sg-test --")), 3)
+        self.nvim.exec_lua(
+            "require('suggestions.backend').remember('sg-session remembered')"
+        )
+        try:
+            rc.write_text(
+                old_rc + "\n_sg_test() { compadd -- --reloaded; }\n"
+                "alias sg-reloaded-alias='git status'\n"
+            )
+            history.write_text(old_history + ": 1700000003:0;sg-disk refreshed\n")
+            self.nvim.command("SuggestionsReload")
+            self.wait_for(lambda: self.inspect()["backend"]["ready"], "reload")
+            self.assertEqual(
+                [x["text"].rstrip() for x in self.backend("sg-test --")],
+                ["sg-test --reloaded"],
+            )
+            self.assertIn(
+                "sg-reloaded-alias",
+                [x["text"].rstrip() for x in self.backend("sg-reloaded-a")],
+            )
+            for prefix, expected in (
+                ("sg-session", "sg-session remembered"),
+                ("sg-disk", "sg-disk refreshed"),
+            ):
+                self.assertIn(
+                    expected,
+                    self.nvim.exec_lua(
+                        "return require('suggestions.backend').history(...)", prefix
+                    ),
+                )
+            self.assertEqual(self.nvim.funcs.maparg("<Tab>", "c", False, True), mapping)
+        finally:
+            rc.write_text(old_rc)
+            history.write_text(old_history)
+            self.nvim.command("SuggestionsReload")
+            self.wait_for(lambda: self.inspect()["backend"]["ready"], "restore zsh")
+
+    def test_reload_during_completion_preserves_input(self):
+        self.enter(":!sg-slow ")
+        self.wait_for(lambda: self.inspect()["backend"]["pending"], "slow request")
+        self.nvim.exec_lua("require('suggestions').reload()")
+        self.assertEqual(self.line(), "!sg-slow ")
+        self.key("<C-u>!sg-test --")
+        self.wait_for(lambda: len(self.current()["items"]) == 3, "fresh completion")
+        time.sleep(0.2)
+        self.assertNotIn("slow-result", repr(self.current()["items"]))
+        self.assertFalse(self.current().get("error"))
+
+    def test_reload_keeps_plugin_disabled(self):
+        self.nvim.command("SuggestionsDisable")
+        try:
+            self.nvim.command("SuggestionsReload")
+            self.assertFalse(self.inspect()["enabled"])
+            self.assertFalse(self.inspect()["backend"]["running"])
+        finally:
+            self.nvim.command("SuggestionsEnable")
 
     def test_z_backend_timeout_recovers(self):
         self.nvim.exec_lua(

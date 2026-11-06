@@ -177,6 +177,14 @@ function M.setup(config)
   state.history, state.session_history = {}, {}
 end
 
+function M.reload()
+  M.stop("zsh reloaded")
+  state.history = vim.deepcopy(state.session_history)
+  local ok, err = start()
+  state.last_error = err
+  return ok, err
+end
+
 function M.request(text, cursor, cwd, callback)
   if text:find("%z") or cwd:find("%z") then
     callback({}, "NUL is not supported")

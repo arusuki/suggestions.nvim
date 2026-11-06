@@ -51,10 +51,18 @@ COMMANDS                                               *suggestions-commands*
 :SuggestionsEnable      Enable the UI and command-line mappings.
 :SuggestionsDisable     Restore mappings/layout and stop the zsh worker.
 :SuggestionsToggle      Toggle the plugin.
+:SuggestionsReload      Restart zsh and reread its startup files and history.
 :checkhealth suggestions
 
-The corresponding Lua functions are enable(), disable(), toggle(). inspect()
-reports UI state, completion state and backend errors for troubleshooting.
+Reload keeps plugin options, mappings, current input and in-memory session
+history. Pending completions are discarded. With automatic completion enabled,
+the active command is completed again. Reload does nothing while disabled.
+The worker is an interactive, non-login shell: .zshenv and .zshrc are read
+according to normal zsh startup rules, but .zprofile and .zlogin are not.
+Definitions made only in another running terminal are not synchronized.
+
+The corresponding Lua functions are enable(), disable(), toggle(), reload().
+inspect() reports UI state, completion state, startup output and backend errors.
 
 HIGHLIGHTS                                           *suggestions-highlights*
 

@@ -396,6 +396,25 @@ function M.setup(opts)
   end
 end
 
+function M.reload()
+  if not state.enabled then
+    return false
+  end
+  -- Invalidate callbacks and debounced requests before stopping the worker.
+  for _, model in pairs(state.levels) do
+    state.serial = state.serial + 1
+    model.serial = state.serial
+    model.identity, model.navigation = nil, nil
+    reset_items(model)
+  end
+  local ok, err = backend.reload()
+  if not ok then
+    vim.notify("suggestions.nvim: " .. err, vim.log.levels.WARN)
+  end
+  queue_render()
+  return ok, err
+end
+
 function M.toggle()
   if state.enabled then
     M.disable()
