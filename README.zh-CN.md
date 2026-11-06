@@ -57,6 +57,8 @@ require("suggestions").setup()
 
 自动出现的候选不会被预选。输入完整命令后，直接回车即可执行，未采纳的灰字不会被执行。
 
+按 Enter 确认候选后，候选列表和灰字会收起，直到继续编辑输入（例如输入空格）才恢复。仅移动光标不会重新弹出补全。也可以按 Tab / Shift-Tab 主动请求候选；直接再按 Enter 则执行已确认的输入。
+
 普通 Ex 命令使用 Neovim 原生补全上下文，包括文件、选项、Lua 和用户命令。`:%s`、可视选区范围、搜索、寄存器插入、`Ctrl-r =` 嵌套表达式和原生执行语义仍由 Neovim 处理。其他 input 提示默认只显示面板，可以通过 input 规则为指定提示启用补全。
 
 灰字只在非空命令的行末显示，搜索和嵌套表达式提示不显示灰字。Ex 历史直接使用 Neovim 已加载的历史（含 ShaDa 和当前会话），遵循 `'history'` 设置和原生历史删除操作；多行历史不用于灰字。未选中候选时，Ex 的 `↑` / `↓` 保留原生历史导航。设置 `completion.auto = false` 后，Ex 历史灰字仍会显示，补全需按 Tab 请求。
@@ -218,10 +220,13 @@ zsh 缺失、启动超时或补全超时时，面板会显示后端不可用，E
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -r tests/requirements.txt
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pre-commit install --install-hooks
 .venv/bin/python -m unittest discover -s tests -p integration.py -v
 .venv/bin/python tests/preview.py
 ```
+
+本地提交 hook 使用 StyLua 格式化已暂存的 Lua 文件，使用 Ruff 格式化 Python 文件，分别遵循 `stylua.toml` 和 `ruff.toml`。格式化工具版本固定在 `.pre-commit-config.yaml` 中。如果格式化修改了文件，检查后重新暂存，再次提交即可。手动格式化整个仓库可运行 `.venv/bin/pre-commit run --all-files`。
 
 测试连接真实 Neovim UI 和真实 zsh，覆盖路径引号、中文光标、多个候选、自定义补全、shell / Ex 历史灰字、补全兜底、取消、过期请求、超时恢复、配置重载、布局及屏幕光标。`tests/preview.py` 从 Neovim 实际 `ext_linegrid` 输出生成暗色 / 亮色预览与 GIF。
 

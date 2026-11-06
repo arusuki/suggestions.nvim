@@ -47,7 +47,7 @@ function M.request(config)
       callback({})
       return
     end
-    request.run({
+    local argv = {
       config.executable,
       "--read0",
       "--print0",
@@ -55,9 +55,16 @@ function M.request(config)
       "--algo=v2",
       "--sort",
       "--tiebreak=index",
-      case or "--smart-case",
       "--filter=" .. query,
-    }, {
+    }
+    -- Smart-case is fzf's default. Use the short case flags because older
+    -- distribution packages (including Ubuntu's 0.44.1) lack the long forms.
+    if case == "--ignore-case" then
+      argv[#argv + 1] = "-i"
+    elseif case == "--no-ignore-case" then
+      argv[#argv + 1] = "+i"
+    end
+    request.run(argv, {
       stdin = table.concat(values, "\0") .. "\0",
       -- User terminal options must not change the machine-readable protocol.
       env = { FZF_DEFAULT_OPTS = "", FZF_DEFAULT_OPTS_FILE = "" },

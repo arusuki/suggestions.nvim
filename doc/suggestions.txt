@@ -11,6 +11,9 @@ Add the plugin to runtimepath, then: >lua
 Type :! to request native zsh completion. Right accepts history ghost text;
 Alt-f accepts one word. Tab/S-Tab select a completion; Enter confirms an
 explicit selection, or executes the current command when nothing is selected.
+After Enter confirms a selection, candidates and ghost text stay hidden until
+the input is edited. Cursor movement alone does not reopen completion.
+Tab/S-Tab can request candidates immediately; another Enter executes the input.
 Up/Down browse prefix-matched zsh history until a completion is selected.
 Esc always cancels. Ctrl-a/Ctrl-e move to start/end; Ctrl-k kills to end.
 

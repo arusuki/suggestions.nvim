@@ -177,6 +177,12 @@ refresh = function(model)
   if model.navigation and model.text ~= model.navigation.expected then
     model.navigation = nil
   end
+  -- Confirming a candidate ends this completion round. Cursor movement and
+  -- redraws must not reopen it; an edit or an explicit Tab request can.
+  if model.confirmed_text == model.text then
+    return
+  end
+  model.confirmed_text = nil
   suggest(model)
   local serial = model.serial
   if state.config.completion.auto then
@@ -252,14 +258,21 @@ local function keycodes(keys)
   return api.nvim_replace_termcodes(keys, true, false, true)
 end
 
-local function apply(model, item)
+local function apply(model, item, confirmed)
   model.navigation = nil
+  model.confirmed_text = confirmed and item.text or nil
+  -- Invalidate pending work before setcmdline delivers its next UI event,
+  -- including confirmation of a candidate equal to the existing input.
+  state.serial = state.serial + 1
+  model.serial = state.serial
   reset_items(model)
   model.identity = nil
   vim.fn.setcmdline(item.text, item.cursor + 1)
+  queue_render()
 end
 
 local function cycle(model, direction)
+  model.confirmed_text = nil
   if #model.items == 0 then
     model.want_select = direction
     complete(model, model.serial)
@@ -319,7 +332,7 @@ function M._key(action)
   elseif action == "confirm" then
     local item = model.items[model.selected]
     if item then
-      apply(model, item)
+      apply(model, item, true)
       return ""
     end
   elseif action == "accept" or action == "accept_word" or action == "line_end" then
@@ -469,7 +482,7 @@ function M.reload()
   for _, model in pairs(state.levels) do
     state.serial = state.serial + 1
     model.serial = state.serial
-    model.identity, model.navigation = nil, nil
+    model.identity, model.navigation, model.confirmed_text = nil, nil, nil
     reset_items(model)
   end
   local ok, err = backend.reload()

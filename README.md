@@ -57,6 +57,8 @@ require("suggestions").setup()
 
 Automatically displayed candidates are not preselected. Enter executes only the current input; unaccepted ghost text is never executed.
 
+After Enter confirms a selection, candidates and ghost text stay hidden until you edit the input (for example, type a space). Moving the cursor alone does not reopen completion. Tab / Shift-Tab can request candidates immediately; another Enter executes the confirmed input.
+
 Ex commands use Neovim's native completion contexts, including files, options, Lua, and user commands. Neovim still handles `:%s`, visual ranges, search, register insertion, nested `Ctrl-r =` expressions, and execution. Other input prompts use the drawer without suggestions by default; input rules can enable completion for specific prompts.
 
 Ghost text appears only at the end of a nonempty command, never in search or nested expression prompts. Ex history uses Neovim's loaded history, including ShaDa and the current session, respects `'history'` and native history deletion, and skips multiline entries. Without an explicit selection, Ex Up/Down retain native history navigation. With `completion.auto = false`, Ex history suggestions still appear; press Tab to request completion.
@@ -220,10 +222,13 @@ Inspired by [terminal_mate.nvim's background zsh approach](https://github.com/be
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -r tests/requirements.txt
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pre-commit install --install-hooks
 .venv/bin/python -m unittest discover -s tests -p integration.py -v
 .venv/bin/python tests/preview.py
 ```
+
+The local commit hook formats staged Lua files with StyLua and Python files with Ruff, using `stylua.toml` and `ruff.toml`. Formatter versions are pinned in `.pre-commit-config.yaml`. If formatting changes a file, review and stage it again, then retry the commit. To format the entire repository manually, run `.venv/bin/pre-commit run --all-files`.
 
 Tests require fzf and connect to real Neovim UI and zsh instances. They cover fuzzy Ex/search matching, recursive paths, case handling, filtering before limiting, missing/failed fzf, quoting, Unicode cursors, multiple candidates, custom completion, shell/Ex history suggestions, cancellation, stale requests, timeout recovery, configuration reload, layout, and screen cursor placement. `tests/preview.py` renders dark/light previews and a GIF from Neovim's actual `ext_linegrid` output.
 

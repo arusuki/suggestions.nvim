@@ -4,6 +4,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         neovim: [v0.11.5, stable]
     steps:
@@ -17,5 +18,11 @@ jobs:
           python-version: '3.12'
       - run: sudo apt-get update && sudo apt-get install -y zsh fzf
       - run: pip install -r tests/requirements.txt
+      - name: Show tool versions
+        run: |
+          nvim --version
+          zsh --version
+          fzf --version
+          python --version
       - run: zsh -n shell/completion.zsh
       - run: python -m unittest discover -s tests -p integration.py -v

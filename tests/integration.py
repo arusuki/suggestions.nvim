@@ -159,6 +159,16 @@ class Integration(unittest.TestCase):
     def line(self):
         return self.nvim.funcs.getcmdline()
 
+    def assert_completion_closed(self):
+        # Wait past the debounce so an automatic reopen cannot pass unnoticed.
+        time.sleep(0.15)
+        current = self.current()
+        self.assertFalse(current["items"])
+        self.assertEqual(current["selected"], 0)
+        self.assertFalse(current.get("loading"))
+        self.assertFalse(current.get("ghost"))
+        self.assertEqual(self.inspect()["ui"]["height"], 3)
+
     def backend(self, text, cursor=None, cwd=None):
         cursor = len(text.encode()) if cursor is None else cursor
         self.nvim.exec_lua(
@@ -400,8 +410,45 @@ class Integration(unittest.TestCase):
         self.key("<Tab><CR>")
         self.assertEqual(self.line(), "set number")
         self.assertEqual(self.nvim.current.window.options["number"], before)
+        self.assert_completion_closed()
         self.key("<CR>")
         self.assertTrue(self.nvim.current.window.options["number"])
+
+    def test_confirm_waits_for_edit_or_explicit_completion(self):
+        self.nvim.exec_lua("""
+          vim.api.nvim_create_user_command('Git', function() end, {
+            nargs = '*', complete = function() return { 'status', 'stash' } end,
+          })
+        """)
+        self.addCleanup(self.nvim.api.del_user_command, "Git")
+        self.addCleanup(self.configure_fuzzy)
+        for fuzzy in (False, True):
+            with self.subTest(fuzzy=fuzzy):
+                self.configure_fuzzy({"enabled": fuzzy})
+                self.enter(":Gi", "Git")
+                self.key("<Tab><CR>")
+                self.assertEqual(self.line(), "Git")
+                self.assert_completion_closed()
+                self.key("<Left><Right>")
+                self.assert_completion_closed()
+                self.key("<Tab>")
+                self.wait_for(
+                    lambda: self.current()["selected"] == 1,
+                    "explicit completion after confirmation",
+                )
+                self.key("<CR>")
+                self.assert_completion_closed()
+                self.key(" ")
+                self.wait_for(lambda: self.current()["items"], "argument completion")
+                self.assertEqual(self.current()["items"][0]["label"], "status")
+                self.key("<Tab><CR>")
+                self.assertEqual(self.line(), "Git status")
+                self.assert_completion_closed()
+                self.key("<BS>")
+                self.wait_for(
+                    lambda: self.current()["items"], "completion after deletion"
+                )
+                self.key("<Esc>")
 
     def test_confirm_already_complete_item_and_reverse_selection(self):
         self.enter(":set number", "number")
@@ -409,6 +456,7 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.current()["selected"], len(self.current()["items"]))
         self.key("<Tab><CR>")
         self.assertEqual(self.line(), "set number")
+        self.assert_completion_closed()
         self.key("<CR>")
         self.assertEqual(self.nvim.api.get_mode()["mode"], "n")
 
@@ -697,6 +745,7 @@ class Integration(unittest.TestCase):
         self.key("<CR>")
         self.assertEqual(self.line(), "sg-test --alpha")
         self.assertFalse(self.nvim.exec_lua("return _G.sg_input_done"))
+        self.assert_completion_closed()
         self.key("<CR>")
         self.wait_for(
             lambda: self.nvim.exec_lua("return _G.sg_input_done"), "input callback"
@@ -945,6 +994,7 @@ class Integration(unittest.TestCase):
                 self.key("<Tab><CR>")
                 self.assertEqual(self.line(), "\\V" + expected)
                 self.assertEqual(self.nvim.api.get_mode()["mode"], "c")
+                self.assert_completion_closed()
                 self.key("<CR>")
                 self.assertEqual(self.nvim.api.get_mode()["mode"], "n")
 
