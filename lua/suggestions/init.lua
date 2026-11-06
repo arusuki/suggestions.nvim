@@ -29,7 +29,11 @@ end
 
 local function suggest(model)
   model.ghost, model.suggestion = nil, nil
-  if model.firstc ~= ":" or model.pos ~= #model.text or model.text == "" then
+  if
+    (model.firstc ~= ":" and not (model.input and model.input.enabled))
+    or model.pos ~= #model.text
+    or model.text == ""
+  then
     return
   end
   local function use(candidate)
@@ -52,7 +56,7 @@ local function suggest(model)
   local history
   if model.shell then
     history = backend.history(text, 1)[1]
-  else
+  elseif not model.input then
     history = completion.ex_history(text)
   end
   if history and use({ text = prefix .. history, cursor = #prefix + #history }) then
@@ -102,7 +106,13 @@ local function complete(model, serial)
   if not state.enabled or active() ~= model or model.serial ~= serial then
     return
   end
-  if (model.firstc ~= ":" and model.firstc ~= "/" and model.firstc ~= "?") or model.text == "" then
+  if model.input and not model.input.enabled then
+    return
+  end
+  if
+    (not model.input and model.firstc ~= ":" and model.firstc ~= "/" and model.firstc ~= "?")
+    or (not model.input and model.text == "")
+  then
     return
   end
   if model.loading then
@@ -148,7 +158,7 @@ local function complete(model, serial)
 end
 
 refresh = function(model)
-  local identity = model.firstc .. "\0" .. model.text .. "\0" .. model.pos
+  local identity = model.cmdtype .. "\0" .. model.prompt .. "\0" .. model.text .. "\0" .. model.pos
   if model.identity == identity then
     return
   end
@@ -156,7 +166,14 @@ refresh = function(model)
   state.serial = state.serial + 1
   model.serial = state.serial
   reset_items(model)
-  model.shell = model.firstc == ":" and completion.shell_prefix(model.text) or nil
+  if model.cmdtype == "@" then
+    model.input = require("suggestions.config").input(state.config.input, model.prompt)
+  else
+    model.input = nil
+  end
+  model.shell = model.input and model.input.enabled and model.input.completion == "shell" and ""
+    or model.firstc == ":" and completion.shell_prefix(model.text)
+    or nil
   if model.navigation and model.text ~= model.navigation.expected then
     model.navigation = nil
   end
@@ -197,6 +214,7 @@ local function on_ui(event, ...)
         buf = state.buf or api.nvim_get_current_buf(),
       }
     model.text, model.pos, model.firstc, model.prompt = flatten(chunks), pos, firstc, prompt
+    model.cmdtype = firstc == "" and vim.fn.getcmdtype() or firstc
     model.indent, model.special = indent, nil
     state.levels[level] = model
   elseif event == "cmdline_pos" then
@@ -283,15 +301,18 @@ function M._key(action)
   end
   local model = active()
   local cmdtype = vim.fn.getcmdtype()
-  if not model or (cmdtype ~= ":" and cmdtype ~= "/" and cmdtype ~= "?") then
+  if not model or (cmdtype ~= ":" and cmdtype ~= "/" and cmdtype ~= "?" and cmdtype ~= "@") then
     return keycodes(fallback)
   end
-  if cmdtype ~= ":" and (not state.config.fuzzy.enabled or not state.config.fuzzy.search) then
+  if (cmdtype == "/" or cmdtype == "?") and (not state.config.fuzzy.enabled or not state.config.fuzzy.search) then
     return keycodes(fallback)
   end
   -- Mappings may run before the next UI redraw has delivered cmdline_show.
   model.text, model.pos = vim.fn.getcmdline(), vim.fn.getcmdpos() - 1
   refresh(model)
+  if cmdtype == "@" and not (model.input and model.input.enabled) then
+    return keycodes(fallback)
+  end
   if action == "next" or action == "previous" then
     cycle(model, action == "next" and 1 or -1)
     return ""
@@ -402,6 +423,11 @@ function M.enable()
         local prefix = completion.shell_prefix(text)
         if prefix then
           backend.remember(text:sub(#prefix + 1))
+        end
+      elseif vim.fn.getcmdtype() == "@" and not vim.v.event.abort then
+        local options = require("suggestions.config").input(state.config.input, vim.fn.getcmdprompt())
+        if options.enabled and options.completion == "shell" then
+          backend.remember(vim.fn.getcmdline())
         end
       end
     end,

@@ -57,7 +57,7 @@ require("suggestions").setup()
 
 自动出现的候选不会被预选。输入完整命令后，直接回车即可执行，未采纳的灰字不会被执行。
 
-普通 Ex 命令使用 Neovim 原生补全上下文，包括文件、选项、Lua 和用户命令。`:%s`、可视选区范围、搜索、寄存器插入、`Ctrl-r =` 嵌套表达式和原生执行语义仍由 Neovim 处理。搜索及其他提示框也使用同一面板，但不请求 zsh 补全。
+普通 Ex 命令使用 Neovim 原生补全上下文，包括文件、选项、Lua 和用户命令。`:%s`、可视选区范围、搜索、寄存器插入、`Ctrl-r =` 嵌套表达式和原生执行语义仍由 Neovim 处理。其他 input 提示默认只显示面板，可以通过 input 规则为指定提示启用补全。
 
 灰字只在非空命令的行末显示，搜索和嵌套表达式提示不显示灰字。Ex 历史直接使用 Neovim 已加载的历史（含 ShaDa 和当前会话），遵循 `'history'` 设置和原生历史删除操作；多行历史不用于灰字。未选中候选时，Ex 的 `↑` / `↓` 保留原生历史导航。设置 `completion.auto = false` 后，Ex 历史灰字仍会显示，补全需按 Tab 请求。
 
@@ -94,6 +94,11 @@ require("suggestions").setup({
     debounce_ms = 70,
     max_results = 80,
   },
+  input = {
+    enabled = false, -- 是否为 input() 提供 suggestions 补全
+    completion = "native",
+    rules = {},
+  },
   fuzzy = {
     enabled = true,
     executable = "fzf", -- 也可使用绝对路径
@@ -117,6 +122,39 @@ require("suggestions").setup({
   },
 })
 ```
+
+### Input 补全与 compile-mode.nvim
+
+可以为 `vim.fn.input()` 和默认的 `vim.ui.input()` 单独配置是否启用补全，以及使用哪种补全。为 [compile-mode.nvim](https://github.com/ej-shafran/compile-mode.nvim) 提供命令补全，在 suggestions 配置中加入：
+
+```lua
+require("suggestions").setup({
+  input = {
+    rules = {
+      {
+        prompt = "^Compile command:",
+        enabled = true,
+        completion = "shell",
+      },
+    },
+  },
+})
+```
+
+该规则将输入直接作为 zsh 命令行补全，无需添加 `!`。它替代这个提示符原有的补全，即使 compile-mode 开启了 `input_word_completion` 也一样。命令名、别名、参数、路径和 shell 历史与 `:!` 共用后端；确认后仍由 compile-mode 接收并执行命令。
+
+`input.enabled` 和 `input.completion` 是默认值。规则按顺序匹配，**第一条匹配的规则生效**，未指定的字段继承默认值。`prompt` 是针对显示提示符的 Lua 模式，包含空白字符。规则中的 `enabled = false` 关闭 suggestions 对该 input 的补全，让 Neovim 处理补全与编辑，抽屉仍然显示。
+
+| `completion` | 行为 |
+| --- | --- |
+| `"native"` | 使用 input 声明的补全类型，包括 `custom` / `customlist` 回调；没有声明时不生成候选。 |
+| `"shell"` | 将整个输入视为 zsh 命令行，提供补全和 shell 历史建议。 |
+| `"file"`、`"dir"`、`"command"` 等 | 为整个输入值指定 Neovim 补全类型；`command` 表示 Ex 命令名。 |
+| `"custom,Function"` / `"customlist,Function"` | 调用 Vimscript 或 `v:lua.Function` 补全函数，传入查询文本、完整输入和按字节计算的光标位置。 |
+
+Input 补全共用 `completion.auto`、`debounce_ms`、`max_results` 及现有选择/接受按键，不使用 fzf。`auto = false` 时按 Tab 请求候选。已有选中候选时，Enter 先接受候选，再按 Enter 提交；没有选择时直接提交当前文本。Esc 取消。确认的 shell 输入加入会话历史，取消的输入不加入。原生 input 候选也可显示灰字建议，但不会使用 Ex 历史。
+
+规则适用于原生命令行输入。如果其他插件将 `vim.ui.input` 替换成浮动 buffer，该输入由那个插件管理，suggestions.nvim 无法为其提供补全。
 
 默认读取交互式 zsh 的启动配置，所以已有 `compinit`、`compdef`、aliases 和 `fpath` 可直接使用。没有初始化补全时，后端使用 `compinit -i -D` 初始化。历史路径优先取 `history_file`，否则使用 zsh 配置里的 `$HISTFILE`，最后回退到 `~/.zsh_history`。历史在后端启动时加载，当前 Neovim 会话中提交的 shell 命令追加到内存；不会改写终端历史文件。
 

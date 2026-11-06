@@ -3,6 +3,7 @@ M.defaults = {
   enabled = true,
   ui = { max_height = 10, max_ratio = 0.35, min_height = 3, padding = 2, separator = "─" },
   completion = { debounce_ms = 70, max_results = 80, auto = true },
+  input = { enabled = false, completion = "native", rules = {} },
   highlights = { match = {}, selected_match = {} },
   fuzzy = {
     enabled = true,
@@ -38,6 +39,30 @@ M.defaults = {
 
 function M.resolve(opts)
   local result = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), opts or {})
+  assert(type(result.input) == "table", "suggestions: input must be a table")
+  local function validate_input(options, rule)
+    assert(
+      (rule and options.enabled == nil) or type(options.enabled) == "boolean",
+      "suggestions: input.enabled must be a boolean"
+    )
+    assert(
+      (rule and options.completion == nil) or (type(options.completion) == "string" and options.completion ~= ""),
+      "suggestions: input.completion must be a nonempty string"
+    )
+    if rule then
+      assert(type(options.prompt) == "string", "suggestions: input rule.prompt must be a Lua pattern")
+      assert(pcall(string.find, "", options.prompt), "suggestions: invalid input prompt pattern")
+    end
+  end
+  validate_input(result.input)
+  assert(
+    type(result.input.rules) == "table" and vim.islist(result.input.rules),
+    "suggestions: input.rules must be a list"
+  )
+  for _, rule in ipairs(result.input.rules) do
+    assert(type(rule) == "table", "suggestions: input rules must be tables")
+    validate_input(rule, true)
+  end
   assert(type(result.zsh.shell) == "string", "suggestions: zsh.shell must be a path")
   assert(type(result.fuzzy.executable) == "string", "suggestions: fuzzy.executable must be a path")
   assert(
@@ -65,5 +90,19 @@ function M.resolve(opts)
   assert(type(result.ui.separator) == "string", "suggestions: ui.separator must be a string")
   result.zsh.max_results = result.completion.max_results
   return result
+end
+
+function M.input(config, prompt)
+  local options = { enabled = config.enabled, completion = config.completion }
+  for _, rule in ipairs(config.rules) do
+    if prompt:find(rule.prompt) then
+      if rule.enabled ~= nil then
+        options.enabled = rule.enabled
+      end
+      options.completion = rule.completion or options.completion
+      break
+    end
+  end
+  return options
 end
 return M

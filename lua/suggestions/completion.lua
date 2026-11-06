@@ -58,7 +58,10 @@ local function ex_items(context, matches, limit)
   local items = {}
   for _, match in ipairs(matches) do
     local word = match
-    if kind == "file" or kind == "dir" or kind == "file_in_path" or kind == "dir_in_path" or kind == "buffer" then
+    if
+      context.escape ~= false
+      and (kind == "file" or kind == "dir" or kind == "file_in_path" or kind == "dir_in_path" or kind == "buffer")
+    then
       word = vim.fn.fnameescape(word)
     end
     items[#items + 1] = {
@@ -83,7 +86,56 @@ function M.ex(line, pos, limit)
   return ok and ex_items(context, matches, limit) or {}
 end
 
+local function input_matches(context, model)
+  local custom, name = context.kind:match("^(custom[^,]*),(.+)$")
+  if not custom then
+    return vim.fn.getcompletion(context.query, context.kind, true)
+  end
+  -- getcompletion() calls custom callbacks with CursorPos=0. Input callbacks
+  -- need the actual full line and byte cursor, including any right-hand text.
+  local matches
+  if name:sub(1, 6) == "v:lua." then
+    matches =
+      vim.fn.eval(("%s(%s, %s, %d)"):format(name, vim.fn.string(context.query), vim.fn.string(model.text), model.pos))
+  else
+    matches = vim.fn.call(name, { context.query, model.text, model.pos })
+  end
+  if custom == "custom" then
+    matches = vim.split(matches, "\n", { trimempty = true })
+    local pattern = vim.regex("\\m^" .. context.query)
+    matches = vim.tbl_filter(function(match)
+      return pattern:match_str(match) ~= nil
+    end, matches)
+  end
+  assert(type(matches) == "table", "input completion must return a list")
+  return matches
+end
+
 function M.request(model, config, callback)
+  if model.input then
+    local kind = model.input.completion
+    local context
+    if kind == "native" then
+      context = ex_context(model.text, model.pos)
+      if not context or context.kind == "" then
+        callback({})
+        return
+      end
+    else
+      -- input() completion types operate on the whole prompt value.
+      context =
+        { kind = kind, prefix = "", before = model.text:sub(1, model.pos), after = model.text:sub(model.pos + 1) }
+      context.query = context.before
+    end
+    -- Unlike Ex arguments, native input() file values are not fnameescaped.
+    context.escape = false
+    local ok, matches = pcall(input_matches, context, model)
+    callback(
+      ok and ex_items(context, matches, config.completion.max_results) or {},
+      not ok and tostring(matches) or nil
+    )
+    return
+  end
   local fuzzy = config.fuzzy
   local is_search = model.firstc == "/" or model.firstc == "?"
   local fallback = not is_search and M.ex(model.text, model.pos, config.completion.max_results) or {}

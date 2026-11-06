@@ -33,6 +33,7 @@ CONFIGURATION                                           *suggestions-config*
     require('suggestions').setup({
       ui = { max_height = 10, max_ratio = 0.35, min_height = 3, padding = 2 },
       completion = { auto = true, debounce_ms = 70, max_results = 80 },
+      input = { enabled = false, completion = 'native', rules = {} },
       fuzzy = {
         enabled = true, executable = 'fzf', timeout_ms = 2000,
         files = true, search = true, highlight = true,
@@ -51,6 +52,52 @@ lua/suggestions/config.lua. Startup files supply compdef, fpath and aliases.
 Zsh history is loaded at worker startup; session commands stay in memory. The
 plugin never writes the user's HISTFILE. Completion text is read as data;
 normal user-defined completion functions may still execute helper commands.
+
+INPUT COMPLETION                                        *suggestions-input*
+
+The drawer displays native input() and default vim.ui.input() prompts. Input
+completion is opt-in, independent of Ex/search completion. For compile-mode.nvim:
+>lua
+    require('suggestions').setup({
+      input = {
+        rules = {
+          {
+            prompt = '^Compile command:',
+            enabled = true,
+            completion = 'shell',
+          },
+        },
+      },
+    })
+<
+input.enabled and input.completion are defaults. Rules are checked in order;
+the first matching rule overrides its specified fields. A rule's prompt is a
+Lua pattern against the displayed prompt, including whitespace. enabled=false
+leaves that input's completion/editing to Neovim while keeping the drawer.
+
+Completion choices:
+  native                  Use the completion declared by input(), including
+                          custom/customlist. No declaration means no candidates.
+  shell                   Zsh command-line completion and history, without an
+                          Ex ! prefix. The original input caller handles execution.
+  file, dir, command      Choose a Neovim completion type for the whole value.
+                          command completes Ex command names, not shell commands.
+  custom,Function         Newline-separated custom matches, filtered by the query.
+  customlist,Function     Custom list, with filtering handled by the callback.
+
+Custom functions may be Vimscript functions or v:lua.Function references. They
+receive the query, full input text, and zero-based byte cursor position.
+Native file input values are not Ex-escaped; shell completion uses zsh quoting.
+
+Input completion uses completion.auto/debounce_ms/max_results and the existing
+selection/accept keys, without fzf. auto=false requests candidates with Tab.
+Enter accepts an explicit selection first; otherwise it submits the input.
+Esc cancels. Shell inputs share shell history suggestions and navigation;
+confirmed inputs enter session history, cancelled inputs do not. Other input
+candidates can supply ghost text but never use Ex history.
+
+These rules do not affect floating buffers from replacement vim.ui.input
+providers. Use the default native input provider for this integration.
 
 FUZZY COMPLETION                                         *suggestions-fuzzy*
 

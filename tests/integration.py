@@ -606,6 +606,263 @@ class Integration(unittest.TestCase):
             str(self.folder / "history"),
         )
 
+    def configure_input(self, options=None, auto=True):
+        self.nvim.exec_lua(
+            """
+            require('suggestions').setup({
+              input = select(1, ...),
+              completion = { debounce_ms = 20, auto = select(2, ...) },
+              zsh = { env = { ZDOTDIR = select(3, ...) }, history_file = select(4, ...) },
+            })
+            """,
+            options or {},
+            auto,
+            str(self.folder),
+            str(self.folder / "history"),
+        )
+
+    def enter_input(self, prompt="Compile command: ", default="", completion=None):
+        options = {"prompt": prompt, "default": default}
+        if completion:
+            options["completion"] = completion
+        self.nvim.exec_lua(
+            """
+            local options = ...
+            _G.sg_input_done, _G.sg_input_result = false, nil
+            _G.sg_input = function()
+              vim.ui.input(options, function(value)
+                _G.sg_input_done, _G.sg_input_result = true, value
+              end)
+            end
+            """,
+            options,
+        )
+        self.nvim.input(":lua _G.sg_input()<CR>")
+        self.wait_for(
+            lambda: (
+                self.current().get("prompt") == prompt
+                and self.current().get("text") == default
+            ),
+            "input prompt",
+        )
+
+    def test_input_default_and_disabled_rule_keep_native_keys(self):
+        self.configure_input()
+        self.addCleanup(self.configure_fuzzy)
+        self.enter_input(default="alp", completion="file")
+        self.assertFalse(self.current()["input"]["enabled"])
+        self.assertFalse(self.current()["items"])
+        self.key("<Right>")
+        self.assertEqual(self.line(), "alp")
+        self.key("<Esc>")
+        self.configure_input(
+            {
+                "enabled": True,
+                "completion": "shell",
+                "rules": [{"prompt": "^Compile command:", "enabled": False}],
+            }
+        )
+        self.enter_input(default="alp", completion="file")
+        self.assertFalse(self.current()["input"]["enabled"])
+        self.assertFalse(self.current().get("ghost"))
+        self.key("<CR>")
+        self.wait_for(
+            lambda: self.nvim.exec_lua("return _G.sg_input_done"),
+            "disabled input callback",
+        )
+        self.assertEqual(self.nvim.exec_lua("return _G.sg_input_result"), "alp")
+
+    def test_input_compile_shell_selection_and_callback(self):
+        self.configure_input(
+            {
+                "rules": [
+                    {
+                        "prompt": "^Compile command:",
+                        "enabled": True,
+                        "completion": "shell",
+                    },
+                    {"prompt": ".*", "enabled": False},
+                ]
+            }
+        )
+        self.addCleanup(self.configure_fuzzy)
+        # Same prompt and customlist declaration as compile-mode.nvim. The
+        # override must use zsh without calling the plugin's native completer.
+        self.enter_input(
+            default="sg-test --", completion="customlist,CompileInputComplete"
+        )
+        self.wait_for(lambda: len(self.current()["items"]) == 3, "input zsh candidates")
+        self.assertEqual(self.current()["shell"], "")
+        self.key("<Tab>")
+        self.key("<CR>")
+        self.assertEqual(self.line(), "sg-test --alpha")
+        self.assertFalse(self.nvim.exec_lua("return _G.sg_input_done"))
+        self.key("<CR>")
+        self.wait_for(
+            lambda: self.nvim.exec_lua("return _G.sg_input_done"), "input callback"
+        )
+        self.assertEqual(
+            self.nvim.exec_lua("return _G.sg_input_result"), "sg-test --alpha"
+        )
+        self.assertEqual(
+            self.nvim.exec_lua(
+                "return require('suggestions.backend').history('sg-test --alpha', 1)[1]"
+            ),
+            "sg-test --alpha",
+        )
+        self.enter_input(prompt="Other: ", default="sg-test --")
+        self.assertFalse(self.current()["input"]["enabled"])
+
+    def test_input_shell_manual_history_and_cancel(self):
+        self.configure_input({"enabled": True, "completion": "shell"}, auto=False)
+        self.addCleanup(self.configure_fuzzy)
+        self.backend("git sta")  # Load isolated history before manual mode.
+        self.enter_input(default="git sta")
+        self.assertFalse(self.current()["items"])
+        self.assertEqual(self.current()["ghost"], "tus --branch")
+        self.key("<Up>")
+        self.assertEqual(self.line(), "git status --branch")
+        self.key("<Down>")
+        self.assertEqual(self.line(), "git sta")
+        self.key("<Right>")
+        self.assertEqual(self.line(), "git status --branch")
+        self.key("<Esc>")
+        self.assertTrue(self.nvim.exec_lua("return _G.sg_input_done"))
+        self.assertIsNone(self.nvim.exec_lua("return _G.sg_input_result"))
+        self.enter_input(default="sg-test --")
+        self.key("<Tab>")
+        self.wait_for(
+            lambda: self.current()["selected"] == 1, "manual input completion"
+        )
+
+    def test_input_native_and_explicit_type(self):
+        self.configure_input({"enabled": True})
+        self.addCleanup(self.configure_fuzzy)
+        self.enter_input(default="alp", completion="file")
+        self.wait_for(lambda: len(self.current()["items"]) == 2, "native input files")
+        self.key("<Tab>")
+        self.key("<Right>")
+        self.assertEqual(self.line(), "alpha.txt")
+        self.key("<Esc>")
+        self.enter_input(default="space", completion="file")
+        self.wait_for(lambda: bool(self.current()["items"]), "input file with spaces")
+        self.key("<Tab>")
+        self.key("<Right>")
+        self.assertEqual(self.line(), "space file.txt")
+        self.key("<Esc>")
+        self.enter_input(default="ls alp", completion="shellcmdline")
+        self.wait_for(
+            lambda: len(self.current()["items"]) == 2, "native shell argument context"
+        )
+        self.key("<Tab>")
+        self.key("<Right>")
+        self.assertEqual(self.line(), "ls alpha.txt")
+        self.key("<Esc>")
+        self.configure_input({"enabled": True, "completion": "file"})
+        self.enter_input(default="alp")
+        self.wait_for(
+            lambda: len(self.current()["items"]) == 2, "configured input files"
+        )
+        self.key("<Esc>")
+        self.configure_input({"enabled": True})
+        self.enter_input(default="set nu")
+        self.assertFalse(self.current()["items"])
+        self.assertFalse(self.current().get("ghost"))
+
+    def test_input_native_custom_and_empty(self):
+        self.nvim.exec_lua("""
+            vim.cmd([[
+              function! SgInputComplete(lead, line, pos)
+                let g:sg_input_args = [a:lead, a:line, a:pos]
+                return ['中文-alpha', '中文-beta']
+              endfunction
+            ]])
+        """)
+        self.configure_input({"enabled": True})
+        self.addCleanup(self.configure_fuzzy)
+        self.enter_input(completion="customlist,SgInputComplete")
+        self.wait_for(
+            lambda: len(self.current()["items"]) == 2, "empty input custom completion"
+        )
+        self.key("中文")
+        self.wait_for(
+            lambda: len(self.current()["items"]) == 2, "unicode input custom completion"
+        )
+        self.assertEqual(self.nvim.vars["sg_input_args"], ["中文", "中文", 6])
+        self.key("<Tab>")
+        self.key("<Right>")
+        self.assertEqual(self.line(), "中文-alpha")
+        self.key("<Esc>")
+        self.enter_input(default="中文 tail", completion="customlist,SgInputComplete")
+        self.key("<Home><Right><Right>")
+        self.wait_for(
+            lambda: self.nvim.vars["sg_input_args"] == ["中文", "中文 tail", 6],
+            "custom cursor context",
+        )
+        self.key("<Tab>")
+        self.key("<Right>")
+        self.assertEqual(self.line(), "中文-alpha tail")
+
+    def test_input_custom_filter_and_error(self):
+        self.nvim.exec_lua("""
+            _G.sg_input_complete = function(lead, line, pos)
+              return 'alpha\\nalpine\\nbeta'
+            end
+        """)
+        self.configure_input(
+            {"enabled": True, "completion": "custom,v:lua.sg_input_complete"}
+        )
+        self.addCleanup(self.configure_fuzzy)
+        self.enter_input(default="alp")
+        self.wait_for(
+            lambda: len(self.current()["items"]) == 2, "custom filtered candidates"
+        )
+        self.assertEqual(
+            [x["text"] for x in self.current()["items"]], ["alpha", "alpine"]
+        )
+        self.key("<Esc>")
+        self.configure_input({"enabled": True, "completion": "invalid-type"})
+        self.enter_input(default="unchanged")
+        self.wait_for(lambda: self.current().get("error"), "input completion error")
+        self.assertTrue(self.inspect()["enabled"])
+        self.key("<CR>")
+        self.wait_for(
+            lambda: self.nvim.exec_lua("return _G.sg_input_done"),
+            "input callback after error",
+        )
+        self.assertEqual(self.nvim.exec_lua("return _G.sg_input_result"), "unchanged")
+
+    def test_input_shell_nested_and_stale_results(self):
+        self.configure_input({"enabled": True, "completion": "shell"})
+        self.addCleanup(self.configure_fuzzy)
+        self.enter_input(default="sg-slow ")
+        self.wait_for(lambda: self.current().get("loading"), "slow input request")
+        self.key("<C-u>sg-test --")
+        self.wait_for(lambda: len(self.current()["items"]) == 3, "fresh input request")
+        self.key("<C-r>=")
+        self.wait_for(lambda: self.current().get("firstc") == "=", "nested expression")
+        self.assertFalse(self.current().get("input"))
+        self.key("''<CR>")
+        self.wait_for(
+            lambda: len(self.current()["items"]) == 3, "resumed input completion"
+        )
+        self.assertEqual(self.line(), "sg-test --")
+
+    def test_input_invalid_configuration(self):
+        for options in (
+            {"enabled": "yes"},
+            {"completion": False},
+            {"rules": [{"prompt": "["}]},
+            {"rules": [{"enabled": True}]},
+            {"rules": {"prompt": "Compile"}},
+        ):
+            self.assertFalse(
+                self.nvim.exec_lua(
+                    "return pcall(require('suggestions.config').resolve, {input = ...})",
+                    options,
+                )
+            )
+
     def test_fuzzy_ex_commands_options_and_help(self):
         for query, expected in (
             ("clr", "colorscheme"),

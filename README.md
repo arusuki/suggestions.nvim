@@ -57,7 +57,7 @@ require("suggestions").setup()
 
 Automatically displayed candidates are not preselected. Enter executes only the current input; unaccepted ghost text is never executed.
 
-Ex commands use Neovim's native completion contexts, including files, options, Lua, and user commands. Neovim still handles `:%s`, visual ranges, search, register insertion, nested `Ctrl-r =` expressions, and execution. Search and other prompts use the drawer without requesting zsh completion.
+Ex commands use Neovim's native completion contexts, including files, options, Lua, and user commands. Neovim still handles `:%s`, visual ranges, search, register insertion, nested `Ctrl-r =` expressions, and execution. Other input prompts use the drawer without suggestions by default; input rules can enable completion for specific prompts.
 
 Ghost text appears only at the end of a nonempty command, never in search or nested expression prompts. Ex history uses Neovim's loaded history, including ShaDa and the current session, respects `'history'` and native history deletion, and skips multiline entries. Without an explicit selection, Ex Up/Down retain native history navigation. With `completion.auto = false`, Ex history suggestions still appear; press Tab to request completion.
 
@@ -94,6 +94,11 @@ require("suggestions").setup({
     debounce_ms = 70,
     max_results = 80,
   },
+  input = {
+    enabled = false, -- Enable suggestions for input() prompts.
+    completion = "native",
+    rules = {},
+  },
   fuzzy = {
     enabled = true,
     executable = "fzf", -- An absolute path also works.
@@ -117,6 +122,39 @@ require("suggestions").setup({
   },
 })
 ```
+
+### Input completion and compile-mode.nvim
+
+Configure completion independently for `vim.fn.input()` and the default `vim.ui.input()`. For [compile-mode.nvim](https://github.com/ej-shafran/compile-mode.nvim), add this to your suggestions setup:
+
+```lua
+require("suggestions").setup({
+  input = {
+    rules = {
+      {
+        prompt = "^Compile command:",
+        enabled = true,
+        completion = "shell",
+      },
+    },
+  },
+})
+```
+
+This sends the command text directly to the zsh backend; no `!` prefix is needed. It overrides compile-mode's input completer for this prompt, including when `input_word_completion` is enabled. Command names, aliases, arguments, paths, and shell history use the same backend as `:!`. Confirmation still returns the command to compile-mode for execution.
+
+`input.enabled` and `input.completion` define defaults. Rules are checked in order; the **first matching rule** overrides only the fields it specifies. `prompt` is a Lua pattern against the displayed prompt, including whitespace. Set `enabled = false` in a rule to leave that input's completion and editing to Neovim while keeping the drawer.
+
+| `completion` | Behavior |
+| --- | --- |
+| `"native"` | Use the input's declared completion type, including `custom` / `customlist` callbacks; no candidates if none is declared. |
+| `"shell"` | Complete the entire input as a zsh command line, with shell history suggestions. |
+| `"file"`, `"dir"`, `"command"`, etc. | Choose a Neovim completion type for the whole input value; `command` means Ex command names. |
+| `"custom,Function"` / `"customlist,Function"` | Call a Vimscript or `v:lua.Function` completer with the query, full input, and byte cursor position. |
+
+Input completion shares `completion.auto`, `debounce_ms`, `max_results`, and the existing selection/accept keys. It does not use fzf. With `auto = false`, Tab requests candidates. Enter accepts a selected candidate first; another Enter submits the input. Without a selection, Enter submits the current text. Esc cancels. Confirmed shell inputs enter session history; cancelled inputs do not. Native input candidates can supply ghost text, but never use Ex history.
+
+These rules apply to native command-line inputs. If another plugin replaces `vim.ui.input` with a floating buffer, it owns that input and suggestions.nvim cannot complete it.
 
 The worker loads interactive zsh startup files, so your existing `compinit`, `compdef`, aliases, and `fpath` are available. If completion has not been initialized, it runs `compinit -i -D`. See the [zsh completion system documentation](https://zsh.sourceforge.io/Doc/Release/Completion-System.html) for these configuration mechanisms.
 

@@ -171,7 +171,8 @@ function M.render(model, config)
   if model.shell then
     left = left .. " · " .. vim.fn.fnamemodify(model.cwd, ":~")
   end
-  local hint = model.error and (model.shell and "zsh unavailable" or "fzf unavailable")
+  local hint = model.error
+      and (model.shell and "zsh unavailable" or model.input and "completion unavailable" or "fzf unavailable")
     or model.loading and "completing…"
     or total > 0 and (tostring(total) .. (total == 1 and " match" or " matches") .. "  ·  tab select  ·  → accept")
     or "esc close"
