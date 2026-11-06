@@ -1,0 +1,21 @@
+name: integration
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        neovim: [v0.11.5, stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y zsh
+      - run: pip install -r tests/requirements.txt
+      - run: zsh -n shell/completion.zsh
+      - run: python -m unittest discover -s tests -p integration.py -v

@@ -1,0 +1,81 @@
+*suggestions.txt*   Bottom command-line drawer with native zsh completion
+
+SETUP                                                    *suggestions-setup*
+
+Requires Neovim 0.11+ and zsh 5.8+ on macOS/Linux.
+Add the plugin to runtimepath, then: >lua
+    require('suggestions').setup()
+<
+Type :! to request native zsh completion. Right accepts history ghost text;
+Alt-f accepts one word. Tab/S-Tab select a completion; Enter confirms an
+explicit selection, or executes the current command when nothing is selected.
+Up/Down browse prefix-matched zsh history until a completion is selected.
+Esc always cancels. Ctrl-a/Ctrl-e move to start/end; Ctrl-k kills to end.
+
+Ordinary Ex commands also show ghost text: the most recent native ':' history
+entry that extends the input takes priority, followed by the first completion
+that extends it. Equal or rewriting candidates are skipped. An explicit Tab
+selection takes priority over history. Right or Ctrl-e accepts the ghost at
+the end of the line; Alt-f accepts one word. Enter never executes unaccepted
+ghost text. Empty lines, search and expression prompts show no ghost text.
+Ex history uses Neovim's loaded history (including ShaDa and this session),
+respects 'history' and histdel(), and skips multiline entries. Up/Down keep
+native Ex history navigation when no completion is selected.
+
+The native command line remains active: Ex ranges, substitutions, registers,
+search and nested expression prompts retain Neovim semantics. :! executes
+through 'shell' and 'shellcmdflag', independently of the completion backend.
+
+CONFIGURATION                                           *suggestions-config*
+>lua
+    require('suggestions').setup({
+      ui = { max_height = 10, max_ratio = 0.35, min_height = 3, padding = 2 },
+      completion = { auto = true, debounce_ms = 70, max_results = 80 },
+      zsh = {
+        shell = 'zsh', timeout_ms = 1800, startup_timeout_ms = 6000,
+        history_limit = 3000,
+        -- history_file = vim.fn.expand('~/.zsh_history'),
+        -- env = { ZDOTDIR = vim.fn.expand('~/.config/zsh') },
+      },
+      keys = { accept = '<Right>', accept_word = '<M-f>' },
+    })
+<
+Set any key entry to false to disable that mapping. Full defaults are in
+lua/suggestions/config.lua. Startup files supply compdef, fpath and aliases.
+Zsh history is loaded at worker startup; session commands stay in memory. The
+plugin never writes the user's HISTFILE. Completion text is read as data;
+normal user-defined completion functions may still execute helper commands.
+
+COMMANDS                                               *suggestions-commands*
+
+:SuggestionsEnable      Enable the UI and command-line mappings.
+:SuggestionsDisable     Restore mappings/layout and stop the zsh worker.
+:SuggestionsToggle      Toggle the plugin.
+:checkhealth suggestions
+
+The corresponding Lua functions are enable(), disable(), toggle(). inspect()
+reports UI state, completion state and backend errors for troubleshooting.
+
+HIGHLIGHTS                                           *suggestions-highlights*
+
+SuggestionsNormal       Drawer surface, derived from Normal.
+SuggestionsMuted        Secondary labels and hints.
+SuggestionsGhost        Inline predicted suffix.
+SuggestionsBorder       Top separator.
+SuggestionsAccent       Prompt.
+SuggestionsSelection    Explicitly selected candidate.
+
+NOTES                                                     *suggestions-notes*
+
+Use only one command-line renderer. Disable Noice cmdline, wilder and
+cmp-cmdline integrations before enabling this plugin. Insert-mode completion
+is separate. Long input scrolls horizontally; multiline shell editing and
+completion-description columns are not currently supported.
+
+The drawer reserves cmdheight while visible and restores it on close.
+The UI uses experimental vim.ui_attach and nvim__redraw APIs.
+
+Reference: https://github.com/beardnick/terminal_mate.nvim
+License: MIT
+
+vim:tw=78:ts=8:ft=help:norl:

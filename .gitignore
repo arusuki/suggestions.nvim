@@ -1,0 +1,6 @@
+nvim.log
+.DS_Store
+__pycache__/
+.venv/
+.ruff_cache/
+doc/tags
