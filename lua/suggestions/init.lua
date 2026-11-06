@@ -370,7 +370,7 @@ function M.enable()
   end
   assert(vim.fn.has("nvim-0.11") == 1, "suggestions.nvim requires Neovim 0.11+")
   state.enabled = true
-  ui.highlights()
+  ui.highlights(state.config.highlights)
   backend.setup(state.config.zsh)
   local ok, err = pcall(vim.ui_attach, ns, { ext_cmdline = true }, on_ui)
   if not ok then
@@ -410,7 +410,7 @@ function M.enable()
   api.nvim_create_autocmd("ColorScheme", {
     group = group,
     callback = function()
-      ui.highlights()
+      ui.highlights(state.config.highlights)
       queue_render()
     end,
   })

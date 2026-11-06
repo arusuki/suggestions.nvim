@@ -758,6 +758,156 @@ class Integration(unittest.TestCase):
               vim.env.FZF_DEFAULT_OPTS_FILE = _G.sg_fzf_env[2]
             """)
 
+    def drawer_match_marks(self):
+        return self.nvim.exec_lua("""
+          local buf = require('suggestions').inspect().ui.buf
+          local ns = vim.api.nvim_get_namespaces()['suggestions.render']
+          local result = {}
+          for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })) do
+            local d = mark[4]
+            if d.hl_group == 'SuggestionsMatch' or d.hl_group == 'SuggestionsSelectedMatch' then
+              local line = vim.api.nvim_buf_get_lines(buf, mark[2], mark[2] + 1, false)[1]
+              result[#result + 1] = {
+                group = d.hl_group, text = line:sub(mark[3] + 1, d.end_col),
+                start = mark[3], finish = d.end_col, line = line,
+              }
+            end
+          end
+          return result
+        """)
+
+    def test_fuzzy_highlight_alignment_and_utf8_offsets(self):
+        for label, query, case, expected in (
+            ("line/linear.py", "linear", None, [[5, 11]]),
+            ("a_b_c", "ac", None, [[0, 1], [4, 5]]),
+            ("中文文件", "中文件", None, [[0, 6], [9, 12]]),
+            ("foo Foo", "Foo", None, [[4, 7]]),
+            ("foo Foo", "Foo", "--ignore-case", [[0, 3]]),
+            ("foo", "Foo", "--no-ignore-case", []),
+            ("!a'b^c$d", "!a'b^c$d", None, [[0, 8]]),
+            ("word", "", None, []),
+            ("a" * 1100, "a" * 1001, None, [[0, 1001]]),
+        ):
+            with self.subTest(label=label[:30], query=query[:30]):
+                spans = self.nvim.exec_lua(
+                    "return require('suggestions.match').spans(...)", label, query, case
+                )
+                self.assertEqual(spans, expected)
+
+    def test_fuzzy_highlight_ex_and_selected_candidate(self):
+        self.enter(":edit spft", "space\\ file.txt")
+        self.wait_for(lambda: self.drawer_match_marks())
+        marks = self.drawer_match_marks()
+        self.assertEqual("".join(mark["text"] for mark in marks), "spft")
+        self.assertTrue(all(mark["group"] == "SuggestionsMatch" for mark in marks))
+        self.key("<Tab>")
+        marks = self.drawer_match_marks()
+        self.assertEqual("".join(mark["text"] for mark in marks), "spft")
+        self.assertTrue(
+            all(mark["group"] == "SuggestionsSelectedMatch" for mark in marks)
+        )
+        self.assertEqual(self.line(), "edit spft")
+        self.key("<Right>")
+        self.assertEqual(self.line(), "edit space\\ file.txt")
+
+    def test_fuzzy_highlight_search_modifiers_and_truncation(self):
+        self.nvim.current.buffer[:] = ["中文文件", "Distributed", "a" * 130]
+        self.enter("/中文件", "中文文件")
+        self.wait_for(lambda: self.drawer_match_marks())
+        self.assertEqual(
+            "".join(x["text"] for x in self.drawer_match_marks()), "中文件"
+        )
+        self.key("<Esc>")
+        self.enter("/dised\\c", "Distributed")
+        self.wait_for(lambda: self.drawer_match_marks())
+        self.assertEqual(
+            "".join(x["text"] for x in self.drawer_match_marks()).lower(), "dised"
+        )
+        self.key("<Esc>")
+        self.nvim.ui_try_resize(60, 32)
+        try:
+            self.enter("/" + "a" * 80, "a" * 130)
+            self.wait_for(lambda: self.drawer_match_marks())
+            marks = self.drawer_match_marks()
+            self.assertEqual(len(marks), 1)
+            self.assertEqual(set(marks[0]["text"]), {"a"})
+            self.assertLess(len(marks[0]["text"]), 80)
+            ellipsis = marks[0]["line"].encode().index("…".encode())
+            self.assertEqual(marks[0]["finish"], ellipsis)
+        finally:
+            self.nvim.ui_try_resize(100, 32)
+
+    def test_fuzzy_highlight_colors_survive_colorscheme(self):
+        from preview import Screen
+
+        self.nvim.exec_lua("""
+          require('suggestions').setup({
+            highlights = {
+              match = { fg = '#ff0088', bold = false },
+              selected_match = { fg = '#00ff88', underline = true },
+            },
+          })
+        """)
+        try:
+            for _ in range(2):
+                normal = self.nvim.api.get_hl(
+                    0, {"name": "SuggestionsMatch", "link": False}
+                )
+                selected = self.nvim.api.get_hl(
+                    0, {"name": "SuggestionsSelectedMatch", "link": False}
+                )
+                self.assertEqual(normal["fg"], 0xFF0088)
+                self.assertFalse(normal.get("bold", False))
+                self.assertEqual(selected["fg"], 0x00FF88)
+                self.assertTrue(selected["underline"])
+                self.nvim.command("colorscheme default")
+            self.enter(":edit spft", "space\\ file.txt")
+            self.wait_for(lambda: self.drawer_match_marks())
+            screen = Screen()
+            screen.read(self.nvim)
+            row = next(
+                row
+                for row in screen.cells
+                if "space file.txt" in "".join(x[0] for x in row)
+            )
+            self.assertEqual(screen.highlights[row[4][1]]["foreground"], 0xFF0088)
+            self.key("<Tab>")
+            screen.read(self.nvim)
+            row = next(
+                row
+                for row in screen.cells
+                if "space file.txt" in "".join(x[0] for x in row)
+            )
+            self.assertEqual(screen.highlights[row[4][1]]["foreground"], 0x00FF88)
+            self.assertEqual(
+                screen.highlights[row[4][1]]["background"],
+                screen.highlights[row[5][1]]["background"],
+            )
+            self.assertTrue(
+                all(
+                    x["group"] == "SuggestionsSelectedMatch"
+                    for x in self.drawer_match_marks()
+                )
+            )
+        finally:
+            self.key("<Esc>")
+            self.configure_fuzzy()
+        self.assertNotEqual(
+            self.nvim.api.get_hl(0, {"name": "SuggestionsMatch"}).get("fg"), 0xFF0088
+        )
+
+    def test_fuzzy_highlight_can_be_disabled(self):
+        self.configure_fuzzy({"highlight": False})
+        try:
+            self.enter(":edit spft", "space\\ file.txt")
+            self.assertFalse(self.drawer_match_marks())
+            self.assertNotIn("matches", self.current()["items"][0])
+            self.key("<Tab><Right>")
+            self.assertEqual(self.line(), "edit space\\ file.txt")
+        finally:
+            self.key("<Esc>")
+            self.configure_fuzzy()
+
     def test_fuzzy_find_fallback_and_hidden_files(self):
         hidden = self.cwd / ".secret-file"
         hidden.touch()

@@ -100,6 +100,7 @@ require("suggestions").setup({
     timeout_ms = 2000,   -- 每个收集/过滤进程的超时
     files = true,
     search = true,
+    highlight = true,    -- 高亮模糊候选中的匹配字符
   },
   zsh = {
     shell = "zsh",    -- 也可使用绝对路径
@@ -129,6 +130,21 @@ vim.opt.shellcmdflag = "-ic"
 这仍是 `:!` 的一次性命令执行，不是持久化终端会话；`!cd` 不改变 Neovim 的目录。交互式 TUI 程序使用 `:terminal`。
 
 可覆盖以下高亮组：`SuggestionsNormal`、`SuggestionsMuted`、`SuggestionsGhost`、`SuggestionsBorder`、`SuggestionsAccent`、`SuggestionsSelection`。默认配色取自当前主题，并在 `ColorScheme` 后重新适配。
+
+模糊匹配字符使用 `SuggestionsMatch` 和 `SuggestionsSelectedMatch`，分别对应普通候选和选中候选。默认使用主题强调色并加粗，保留选中行的背景色。可以通过 setup 配置颜色及其他 `nvim_set_hl` 属性，切换主题后会重新应用：
+
+```lua
+require("suggestions").setup({
+  highlights = {
+    match = { fg = "#f4468f", bold = true },
+    selected_match = { fg = "#ffd166", bold = true, underline = true },
+  },
+})
+```
+
+未设置上述选项时，也可直接通过 `vim.api.nvim_set_hl` 覆盖这两个高亮组。设置 `fuzzy.highlight = false` 只关闭字符高亮，不改变补全行为。
+
+匹配位置计算改编自 [wilder-fzf 的 Lua 高亮实现](https://github.com/arusuki/wilder.nvim/blob/master/wilder-fzf/lua/wilder_fzf/highlighter.lua)：使用 fzf v2 风格的边界/连续匹配评分和回溯，超长输入回退到 v1。例如 `linear` 会高亮 `line/linear.py` 中 `/` 后的连续匹配。高亮与过滤共享实际查询和大小写模式，支持 UTF-8 字节位置，并在截断省略号之前停止。筛选和排序仍由 fzf 完成；与参考实现一样，仅用于显示的位置计算未实现 fzf 的重音字符归一化。
 
 ## 管理与兼容
 

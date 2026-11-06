@@ -96,13 +96,18 @@ function M.request(model, config, callback)
     return
   end
   local request = require("suggestions.fzf").request(fuzzy)
-  local function finish(items, err)
+  local function finish(items, err, matching)
     if not items then
       callback(fallback, err)
       return
     end
     while #items > config.completion.max_results do
       items[#items] = nil
+    end
+    if fuzzy.highlight and matching then
+      for _, item in ipairs(items) do
+        item.matches = require("suggestions.match").spans(item.label, matching.query, matching.case)
+      end
     end
     callback(items)
   end
@@ -115,8 +120,8 @@ function M.request(model, config, callback)
       return
     end
     context.cwd = model.cwd
-    local handled = require("suggestions.fuzzy").ex(request, context, fuzzy, function(matches, err)
-      finish(matches and ex_items(context, matches, config.completion.max_results), err)
+    local handled = require("suggestions.fuzzy").ex(request, context, fuzzy, function(matches, err, matching)
+      finish(matches and ex_items(context, matches, config.completion.max_results), err, matching)
     end)
     if not handled then
       callback(fallback)

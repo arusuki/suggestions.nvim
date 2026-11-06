@@ -12,7 +12,7 @@ local function blend(a, b, ratio)
   return out
 end
 
-function M.highlights()
+function M.highlights(config)
   local function hl(name)
     return api.nvim_get_hl(0, { name = name, link = false })
   end
@@ -33,6 +33,17 @@ function M.highlights()
     value.default = true
     api.nvim_set_hl(0, "Suggestions" .. name, value)
   end
+  local configured = {}
+  for key, name in pairs({ match = "Match", selected_match = "SelectedMatch" }) do
+    local override = config and config[key] or {}
+    configured[key] = next(override) ~= nil
+    local value = vim.tbl_extend("force", { fg = accent.fg or 0x89b4fa, bold = true }, override)
+    -- Explicit setup options survive ColorScheme. With no options, allow the
+    -- usual nvim_set_hl overrides; reset colors previously managed by setup.
+    value.default = not configured[key] and not (state.configured_highlights or {})[key]
+    api.nvim_set_hl(0, "Suggestions" .. name, value)
+  end
+  state.configured_highlights = configured
 end
 
 local function width(text)
@@ -58,13 +69,14 @@ end
 
 local function truncate(text, columns)
   if columns <= 0 then
-    return ""
+    return "", 0
   end
   text = clean(text)
   if width(text) <= columns then
-    return text
+    return text, #text
   end
-  return take(text, columns - 1) .. "…"
+  local visible = take(text, columns - 1)
+  return visible .. "…", #visible
 end
 
 local function mark(row, start, finish, group, extra)
@@ -170,7 +182,7 @@ function M.render(model, config)
   end
   local separator = width(config.separator) == 1 and config.separator or "─"
   local header = separator .. left .. string.rep(separator, math.max(0, columns - width(left .. right) - 1)) .. right
-  local lines = { truncate(header, columns) }
+  local lines = { (truncate(header, columns)) }
   local first = math.max(1, math.min(model.selected - count + 1, total - count + 1))
   local rows = {}
   for i = 1, count do
@@ -182,10 +194,17 @@ function M.render(model, config)
       local selected = index == model.selected
       local lead = pad .. (selected and "› " or "  ")
       local badge = "  " .. (item.source or "") .. pad
-      local text = truncate(item.label or item.text, math.max(1, columns - width(lead .. badge) - 1))
+      local text, visible = truncate(item.label or item.text, math.max(1, columns - width(lead .. badge) - 1))
       local gap = string.rep(" ", math.max(1, columns - width(lead .. text .. badge)))
       lines[#lines + 1] = lead .. text .. gap .. badge
-      rows[#rows + 1] = { row = #lines - 1, selected = selected, badge = #(lead .. text .. gap) }
+      rows[#rows + 1] = {
+        row = #lines - 1,
+        selected = selected,
+        badge = #(lead .. text .. gap),
+        matches = item.matches,
+        offset = #lead,
+        visible = visible,
+      }
     end
   end
   while #lines < height - 1 do
@@ -215,9 +234,21 @@ function M.render(model, config)
   mark(0, math.max(0, #lines[1] - #right), #lines[1], "SuggestionsMuted")
   for _, row in ipairs(rows) do
     if row.selected then
-      mark(row.row, 0, #lines[row.row + 1], "SuggestionsSelection", { hl_eol = true })
+      mark(row.row, 0, #lines[row.row + 1], "SuggestionsSelection", { hl_eol = true, priority = 100 })
     else
       mark(row.row, row.badge, #lines[row.row + 1], "SuggestionsMuted")
+    end
+    for _, span in ipairs(row.matches or {}) do
+      local last = math.min(span[2], row.visible)
+      if span[1] < last then
+        mark(
+          row.row,
+          row.offset + span[1],
+          row.offset + last,
+          row.selected and "SuggestionsSelectedMatch" or "SuggestionsMatch",
+          { priority = 150, hl_mode = "combine" }
+        )
+      end
     end
   end
   mark(prompt_row, 0, #prefix, "SuggestionsAccent")

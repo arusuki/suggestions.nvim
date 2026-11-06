@@ -100,6 +100,7 @@ require("suggestions").setup({
     timeout_ms = 2000,   -- Per collection/filter process.
     files = true,
     search = true,
+    highlight = true,    -- Highlight matched characters in fuzzy candidates.
   },
   zsh = {
     shell = "zsh",    -- An absolute path also works.
@@ -131,6 +132,21 @@ vim.opt.shellcmdflag = "-ic"
 Each `:!` is still a separate command execution, not a persistent terminal session. `!cd` does not change Neovim's directory. Use `:terminal` for interactive TUI programs.
 
 Override these highlight groups to customize the appearance: `SuggestionsNormal`, `SuggestionsMuted`, `SuggestionsGhost`, `SuggestionsBorder`, `SuggestionsAccent`, and `SuggestionsSelection`. Defaults follow the current theme and refresh on `ColorScheme`.
+
+Fuzzy matches use `SuggestionsMatch` and `SuggestionsSelectedMatch`. Both default to the theme's accent color with bold text, preserving the selected row's background. Configure colors and other `nvim_set_hl` attributes through setup; these overrides are reapplied after `ColorScheme`:
+
+```lua
+require("suggestions").setup({
+  highlights = {
+    match = { fg = "#f4468f", bold = true },
+    selected_match = { fg = "#ffd166", bold = true, underline = true },
+  },
+})
+```
+
+With empty highlight options (the default), you can override those groups directly with `vim.api.nvim_set_hl`. Set `fuzzy.highlight = false` to disable match highlighting without changing completion.
+
+Match positions adapt [wilder-fzf's Lua highlighter](https://github.com/arusuki/wilder.nvim/blob/master/wilder-fzf/lua/wilder_fzf/highlighter.lua): fzf-v2-style boundary/consecutive scoring and backtracking, with a bounded v1 fallback for very long inputs. For example, `linear` highlights the segment after `/` in `line/linear.py`. The actual query and case mode are shared with the filter; spans use UTF-8 byte offsets and stop before the truncation ellipsis. fzf still controls filtering and ordering. Like the reference implementation, this display-only alignment does not implement fzf's accent normalization.
 
 ## Commands and compatibility
 

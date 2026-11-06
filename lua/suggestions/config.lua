@@ -3,12 +3,14 @@ M.defaults = {
   enabled = true,
   ui = { max_height = 10, max_ratio = 0.35, min_height = 3, padding = 2, separator = "─" },
   completion = { debounce_ms = 70, max_results = 80, auto = true },
+  highlights = { match = {}, selected_match = {} },
   fuzzy = {
     enabled = true,
     executable = "fzf",
     timeout_ms = 2000,
     files = true,
     search = true,
+    highlight = true,
   },
   zsh = {
     shell = "zsh",
@@ -42,8 +44,11 @@ function M.resolve(opts)
     type(result.fuzzy.timeout_ms) == "number" and result.fuzzy.timeout_ms > 0,
     "suggestions: fuzzy.timeout_ms must be positive"
   )
-  for _, key in ipairs({ "enabled", "files", "search" }) do
+  for _, key in ipairs({ "enabled", "files", "search", "highlight" }) do
     assert(type(result.fuzzy[key]) == "boolean", "suggestions: fuzzy." .. key .. " must be a boolean")
+  end
+  for _, key in ipairs({ "match", "selected_match" }) do
+    assert(type(result.highlights[key]) == "table", "suggestions: highlights." .. key .. " must be a table")
   end
   for _, key in ipairs({ "max_height", "min_height", "padding" }) do
     assert(

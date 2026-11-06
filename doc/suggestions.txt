@@ -35,7 +35,7 @@ CONFIGURATION                                           *suggestions-config*
       completion = { auto = true, debounce_ms = 70, max_results = 80 },
       fuzzy = {
         enabled = true, executable = 'fzf', timeout_ms = 2000,
-        files = true, search = true,
+        files = true, search = true, highlight = true,
       },
       zsh = {
         shell = 'zsh', timeout_ms = 1800, startup_timeout_ms = 6000,
@@ -105,6 +105,27 @@ SuggestionsGhost        Inline predicted suffix.
 SuggestionsBorder       Top separator.
 SuggestionsAccent       Prompt.
 SuggestionsSelection    Explicitly selected candidate.
+SuggestionsMatch        Matched characters in fuzzy candidates.
+SuggestionsSelectedMatch Matched characters in the selected fuzzy candidate.
+
+Configure match colors with nvim_set_hl attributes (reapplied on ColorScheme):
+>lua
+    require('suggestions').setup({
+      highlights = {
+        match = { fg = '#f4468f', bold = true },
+        selected_match = { fg = '#ffd166', bold = true, underline = true },
+      },
+    })
+<
+Defaults use the theme accent color and bold text without replacing the row
+background. With empty options, nvim_set_hl can override these groups directly.
+fuzzy.highlight=false disables highlighting without changing fuzzy results.
+
+Match positions adapt wilder-fzf's v2-style scoring/backtracking, with its v1
+fallback for long input. Query and case handling follow the fzf request. Spans
+use UTF-8 byte offsets into labels and exclude the truncation ellipsis. Only
+fzf decides filtering/order; display alignment does not normalize accents.
+Source: https://github.com/arusuki/wilder.nvim/blob/master/wilder-fzf/lua/wilder_fzf/highlighter.lua
 
 NOTES                                                     *suggestions-notes*
 

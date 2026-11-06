@@ -114,7 +114,9 @@ function M.ex(request, context, config, callback)
       callback(nil, err)
       return
     end
-    request.filter(values, query, nil, callback)
+    request.filter(values, query, nil, function(matches, filter_err)
+      callback(matches, filter_err, { query = query })
+    end)
   end
   if kind == "file" or kind == "dir" or kind == "dir_in_path" then
     -- Special paths and wildcards belong to Neovim's path expansion rules.
@@ -192,7 +194,7 @@ function M.search(request, model, callback)
         source = "search",
       }
     end
-    callback(items)
+    callback(items, nil, { query = query, case = case })
   end)
 end
 
