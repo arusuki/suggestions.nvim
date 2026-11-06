@@ -7,6 +7,13 @@ function M.check()
     vim.health.error("Neovim 0.11+ is required")
   end
   local info = require("suggestions").inspect()
+  if not info.fuzzy.enabled then
+    vim.health.info("fzf completion disabled")
+  elseif vim.fn.executable(info.fuzzy.executable) == 1 then
+    vim.health.ok("fzf: " .. vim.fn.exepath(info.fuzzy.executable))
+  else
+    vim.health.warn("fzf executable not found: " .. info.fuzzy.executable .. "; Ex uses native completion")
+  end
   if vim.fn.executable(info.shell) == 1 then
     vim.health.ok("zsh: " .. vim.fn.exepath(info.shell))
   else

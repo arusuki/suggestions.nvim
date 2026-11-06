@@ -12,6 +12,8 @@ The drawer spans the editor width, has no outer frame, and adapts to your theme.
 
 Requires **Neovim 0.11+ and zsh 5.8+** on macOS or Linux. The plugin has no third-party Lua, Python, or tmux runtime dependencies.
 
+Install **fzf** to enable fuzzy completion (enabled by default). Without it, Ex completion falls back to Neovim and search suggestions are unavailable. Optional **fd** speeds up project file collection; otherwise the plugin uses `find`.
+
 Try it from this repository:
 
 ```sh
@@ -20,7 +22,7 @@ nvim -u ./minimal.lua
 
 Press `:` and type `!git st`, `!cd ~/`, or `!ls `. Ghost text prefers zsh history, then the first completion that extends your input. Press Right to accept it.
 
-For Ex commands, try `:set nu` or `:edit al`. The most recent matching Neovim `:` history entry takes priority, followed by native completion. Candidates that equal the input or rewrite its prefix are skipped for automatic ghost text. An explicit Tab selection takes priority.
+For Ex commands, try `:set nu` or `:edit al`. The most recent matching Neovim `:` history entry takes priority, followed by completion. Candidates that equal the input or rewrite its prefix are skipped for automatic ghost text. An explicit Tab selection takes priority.
 
 Install with lazy.nvim:
 
@@ -63,6 +65,20 @@ Shell completion supports `!cmd`, `2,4!cmd`, `read !cmd`, and `write !cmd`. Cand
 
 ## Configuration
 
+### Fuzzy completion
+
+The fzf backend follows the candidate collection → filtering approach of [wilder-fzf](https://github.com/arusuki/wilder.nvim/tree/master/wilder-fzf), integrated into the existing drawer and acceptance keys:
+
+- Ex command names, options, buffers, help tags, colorschemes, compilers, filetypes, events, augroups, highlights, history types, packages, syntax names, environment variables, and users are collected before fuzzy matching. Try `:set rnu` → `relativenumber` or `:help usr41` → `usr_41.txt`. Custom callbacks, Lua/expression completion, and other unsupported contexts retain native behavior.
+- File/directory completion searches recursively from the nearest `.git`/`.hg` root, falling back to the originating window's working directory. Paths are inserted relative to that window, including with `:lcd`. Try `:edit lsc` to find `lua/suggestions/completion.lua`. `fd` respects ignore files; the `find` fallback skips hidden entries but does not read ignore files. A query starting with `.` or containing `/.` includes hidden entries; `.git`/`.hg` are always excluded. Paths beginning with `~`, `/`, `\\`, `..`, `%`, `#`, `<`, or `$`, and wildcard/environment-variable paths use native completion.
+- `/` and `?` collect complete, unique keywords from the current buffer using its `iskeyword`. `/dised` can match `distributed`, and `/ac` can match `a_b_c`. Matching uses smartcase; explicit `\c`/`\C` overrides it. Accepting a candidate inserts a literal `\V` search, preserving an explicit case modifier and the search direction. Search has no ghost text. Tab selects, Right or Enter accepts, and a subsequent Enter executes the search.
+
+Matching and sorting run asynchronously through `fzf --filter`, using literal fuzzy queries (fzf's extended operators are disabled). `completion.max_results` applies **after** matching. User `FZF_DEFAULT_OPTS` and `FZF_DEFAULT_OPTS_FILE` do not affect the backend. New input, closing, reload, and disable cancel obsolete jobs; errors/timeouts retain native Ex candidates and appear in `inspect().current.error`.
+
+Shell completion and prefix history suggestions continue to use zsh. Set `fuzzy.enabled = false` to restore native Ex completion without search suggestions, `fuzzy.files = false` to keep native file completion, or `fuzzy.search = false` to disable search suggestions.
+
+### Options
+
 ```lua
 require("suggestions").setup({
   enabled = true,
@@ -77,6 +93,13 @@ require("suggestions").setup({
     auto = true,      -- false: request completion with Tab.
     debounce_ms = 70,
     max_results = 80,
+  },
+  fuzzy = {
+    enabled = true,
+    executable = "fzf", -- An absolute path also works.
+    timeout_ms = 2000,   -- Per collection/filter process.
+    files = true,
+    search = true,
   },
   zsh = {
     shell = "zsh",    -- An absolute path also works.
@@ -148,7 +171,7 @@ python3 -m venv .venv
 .venv/bin/python tests/preview.py
 ```
 
-Tests connect to real Neovim UI and zsh instances. They cover quoting, Unicode cursors, multiple candidates, custom completion, shell/Ex history suggestions, completion fallback, cancellation, stale requests, timeout recovery, configuration reload, layout, and screen cursor placement. `tests/preview.py` renders dark/light previews and a GIF from Neovim's actual `ext_linegrid` output.
+Tests require fzf and connect to real Neovim UI and zsh instances. They cover fuzzy Ex/search matching, recursive paths, case handling, filtering before limiting, missing/failed fzf, quoting, Unicode cursors, multiple candidates, custom completion, shell/Ex history suggestions, cancellation, stale requests, timeout recovery, configuration reload, layout, and screen cursor placement. `tests/preview.py` renders dark/light previews and a GIF from Neovim's actual `ext_linegrid` output.
 
 ## References and credits
 

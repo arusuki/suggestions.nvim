@@ -3,6 +3,8 @@
 SETUP                                                    *suggestions-setup*
 
 Requires Neovim 0.11+ and zsh 5.8+ on macOS/Linux.
+Fuzzy completion uses fzf (enabled by default); optional fd collects files,
+with find as fallback. Missing fzf falls back to native Ex completion.
 Add the plugin to runtimepath, then: >lua
     require('suggestions').setup()
 <
@@ -31,6 +33,10 @@ CONFIGURATION                                           *suggestions-config*
     require('suggestions').setup({
       ui = { max_height = 10, max_ratio = 0.35, min_height = 3, padding = 2 },
       completion = { auto = true, debounce_ms = 70, max_results = 80 },
+      fuzzy = {
+        enabled = true, executable = 'fzf', timeout_ms = 2000,
+        files = true, search = true,
+      },
       zsh = {
         shell = 'zsh', timeout_ms = 1800, startup_timeout_ms = 6000,
         history_limit = 3000,
@@ -45,6 +51,33 @@ lua/suggestions/config.lua. Startup files supply compdef, fpath and aliases.
 Zsh history is loaded at worker startup; session commands stay in memory. The
 plugin never writes the user's HISTFILE. Completion text is read as data;
 normal user-defined completion functions may still execute helper commands.
+
+FUZZY COMPLETION                                         *suggestions-fuzzy*
+
+Enumerable Ex contexts use fzf --filter for matching and sorting. For example,
+:set rnu matches relativenumber; :help usr41 matches usr_41.txt. Custom callbacks
+and Lua/expression contexts keep native completion. File/directory completion
+recursively searches the nearest .git/.hg root, or the window's cwd, inserting
+paths relative to that window. Special/absolute paths and wildcards use native
+completion. fd respects ignore files; find skips hidden entries but ignores no
+ignore files. A leading dot or /. in the query includes hidden entries, except
+.git and .hg. There is no persistent file cache.
+
+/ and ? collect unique keywords using the current buffer's iskeyword, then
+fuzzy match with smartcase. Explicit \c / \C overrides case handling. Tab
+selects, Right/Enter accepts, and a subsequent Enter executes. Accepted words
+use literal \V search syntax, preserving explicit case modifiers. No search
+ghost text is shown. The search direction remains native.
+
+max_results limits results after fzf matching. Queries use ordinary fuzzy
+matching, without extended fzf operators. FZF_DEFAULT_OPTS and its options file
+are ignored. Jobs are asynchronous, cancellable, and bounded by timeout_ms per
+process. Errors fall back to native Ex candidates; inspect().current.error
+reports the cause. :checkhealth suggestions checks the configured executable.
+
+fuzzy.enabled=false disables fuzzy Ex and search completion; fuzzy.files=false
+keeps native file completion; fuzzy.search=false disables search candidates.
+Zsh completion and history suggestions are unaffected.
 
 COMMANDS                                               *suggestions-commands*
 

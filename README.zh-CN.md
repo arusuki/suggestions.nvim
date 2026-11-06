@@ -12,6 +12,8 @@
 
 需要 **Neovim 0.11+、zsh 5.8+**，适用于 macOS / Linux。插件运行时没有第三方 Lua、Python 或 tmux 依赖。
 
+安装 **fzf** 后即可使用默认开启的模糊补全；未安装时，Ex 回退为 Neovim 原生补全，搜索候选不可用。可选安装 **fd** 加速项目文件收集，否则使用 `find`。
+
 在这个项目目录运行：
 
 ```sh
@@ -20,7 +22,7 @@ nvim -u ./minimal.lua
 
 按 `:`，输入 `!git st`、`!cd ~/` 或 `!ls `。灰字优先来自 zsh 历史，没有历史匹配时使用第一个可延伸当前输入的补全。按右方向键采纳。
 
-普通命令也可试试 `:set nu` 或 `:edit al`：灰字优先使用 Neovim `:` 历史中最近一条能延伸当前输入的命令，否则使用第一条能延伸输入的原生补全。与输入相同或需要改写前文的候选会被跳过；Tab 显式选中后，以选中项为准。
+普通命令也可试试 `:set nu` 或 `:edit al`：灰字优先使用 Neovim `:` 历史中最近一条能延伸当前输入的命令，否则使用第一条能延伸输入的补全。与输入相同或需要改写前文的候选会被跳过；Tab 显式选中后，以选中项为准。
 
 使用 lazy.nvim 安装：
 
@@ -63,6 +65,20 @@ require("suggestions").setup()
 
 ## 配置
 
+### 模糊补全
+
+参照 [wilder-fzf](https://github.com/arusuki/wilder.nvim/tree/master/wilder-fzf) 的候选收集 → fzf 过滤方式，接入现有面板和确认按键：
+
+- Ex 命令名、选项、buffer、帮助标签、配色、编译器、文件类型、事件、自动命令组、高亮组、历史类型、包、语法名、环境变量和用户名先收集候选，再交给 fzf 匹配。例如 `:set rnu` → `relativenumber`、`:help usr41` → `usr_41.txt`。自定义补全回调、Lua/表达式及其他未支持的上下文保留原生行为。
+- 文件和目录从最近的 `.git` / `.hg` 项目根目录递归收集；没有项目标记则使用发起窗口的工作目录。插入路径相对于该窗口，支持 `:lcd`。例如 `:edit lsc` 可匹配 `lua/suggestions/completion.lua`。`fd` 遵循 ignore 文件；`find` 回退跳过隐藏项，但不读取 ignore 文件。查询以 `.` 开头或包含 `/.` 时包含隐藏项，始终排除 `.git` / `.hg`。以 `~`、`/`、`\\`、`..`、`%`、`#`、`<`、`$` 开头，以及含通配符或环境变量的路径交回原生补全。
+- `/`、`?` 按当前 buffer 的 `iskeyword` 收集完整且去重的关键词。`/dised` 可匹配 `distributed`，`/ac` 可匹配 `a_b_c`。默认 smartcase，显式 `\c` / `\C` 覆盖大小写规则。采纳后插入 `\V` 字面搜索，保留显式大小写修饰符和搜索方向。搜索不显示灰字；Tab 选择，Right 或 Enter 采纳，再按 Enter 执行搜索。
+
+匹配和排序通过异步 `fzf --filter` 完成，使用普通模糊查询，关闭 fzf 扩展运算符。`completion.max_results` 在**匹配之后**应用。用户的 `FZF_DEFAULT_OPTS` 和 `FZF_DEFAULT_OPTS_FILE` 不影响后端。新输入、关闭、reload 和禁用会取消过期任务；错误或超时时保留原生 Ex 候选，可在 `inspect().current.error` 查看原因。
+
+Shell 补全及前缀历史建议继续使用 zsh。设置 `fuzzy.enabled = false` 恢复原生 Ex 补全并关闭搜索候选；`fuzzy.files = false` 单独保留原生文件补全；`fuzzy.search = false` 单独关闭搜索候选。
+
+### 选项
+
 ```lua
 require("suggestions").setup({
   enabled = true,
@@ -77,6 +93,13 @@ require("suggestions").setup({
     auto = true,      -- false：按 Tab 后请求补全
     debounce_ms = 70,
     max_results = 80,
+  },
+  fuzzy = {
+    enabled = true,
+    executable = "fzf", -- 也可使用绝对路径
+    timeout_ms = 2000,   -- 每个收集/过滤进程的超时
+    files = true,
+    search = true,
   },
   zsh = {
     shell = "zsh",    -- 也可使用绝对路径

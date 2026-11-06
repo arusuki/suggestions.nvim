@@ -592,6 +592,264 @@ class Integration(unittest.TestCase):
         self.assertFalse(self.inspect()["backend"]["running"])
         self.assertTrue(self.backend("sg-test --a"))
 
+    def configure_fuzzy(self, options=None, completion=None):
+        self.nvim.exec_lua(
+            """
+            require('suggestions').setup({
+              fuzzy = select(1, ...), completion = select(2, ...),
+              zsh = { env = { ZDOTDIR = select(3, ...) }, history_file = select(4, ...) },
+            })
+            """,
+            options or {},
+            completion or {"debounce_ms": 20},
+            str(self.folder),
+            str(self.folder / "history"),
+        )
+
+    def test_fuzzy_ex_commands_options_and_help(self):
+        for query, expected in (
+            ("clr", "colorscheme"),
+            ("set rnu", "relativenumber"),
+            ("set nornu", "norelativenumber"),
+            ("help usr41", "usr_41.txt"),
+        ):
+            with self.subTest(query=query):
+                self.enter(":" + query, expected)
+                self.assertFalse(self.current().get("error"))
+                self.assertEqual(self.line(), query)
+                self.key("<Esc>")
+
+    def test_fuzzy_recursive_files_and_directories(self):
+        for query, expected in (
+            ("edit ad/it", "a-directory/inside.txt"),
+            ("cd ad", "a-directory/"),
+            ("edit spft", "space\\ file.txt"),
+            ("edit 中文件", "中文文件.txt"),
+        ):
+            with self.subTest(query=query):
+                self.enter(":" + query, expected)
+                self.assertFalse(self.current().get("ghost"))
+                self.key("<Tab><CR>")
+                self.assertEqual(self.line(), query.split(" ")[0] + " " + expected)
+                self.assertEqual(
+                    self.nvim.funcs.getcmdpos(), len(self.line().encode()) + 1
+                )
+                self.key("<Esc>")
+
+    def test_fuzzy_middle_cursor_keeps_suffix(self):
+        self.enter(":edit spft | echo 123")
+        self.key("<Home>" + "<Right>" * len("edit spft"))
+        self.wait_for(
+            lambda: any(
+                "space\\ file.txt" in x["text"] for x in self.current()["items"]
+            )
+        )
+        self.key("<Tab><Right>")
+        self.assertEqual(self.line(), "edit space\\ file.txt | echo 123")
+        self.assertEqual(self.nvim.funcs.getcmdpos(), len("edit space\\ file.txt") + 1)
+
+    def test_fuzzy_project_root_from_local_cwd(self):
+        project = self.folder / "project"
+        (project / ".git").mkdir(parents=True, exist_ok=True)
+        (project / "sub").mkdir(exist_ok=True)
+        (project / "outside.txt").touch()
+        self.nvim.command("lcd " + self.nvim.funcs.fnameescape(str(project / "sub")))
+        try:
+            self.enter(":edit ost", "../outside.txt")
+            self.key("<Tab><Right>")
+            self.assertEqual(self.line(), "edit ../outside.txt")
+        finally:
+            self.key("<Esc>")
+            self.nvim.command("lcd " + self.nvim.funcs.fnameescape(str(self.cwd)))
+
+    def test_fuzzy_buffers_and_special_paths(self):
+        buf = self.nvim.funcs.bufadd(str(self.cwd / "alpha.txt"))
+        self.nvim.api.set_option_value("buflisted", True, {"buf": buf})
+        try:
+            self.enter(":buffer aht", "alpha.txt")
+            self.key("<Esc>")
+            self.enter(":edit " + str(self.cwd) + "/al", "alpha.txt")
+            self.assertEqual(len(self.current()["items"]), 2)
+        finally:
+            self.key("<Esc>")
+            self.nvim.api.buf_delete(buf, {"force": True})
+
+    def test_fuzzy_search_both_directions_and_explicit_accept(self):
+        self.nvim.current.buffer[:] = ["distributed a_b_c 中文文件", "Distributed"]
+        for query, expected in (
+            ("/dised", "distributed"),
+            ("?ac", "a_b_c"),
+            ("/中文件", "中文文件"),
+        ):
+            with self.subTest(query=query):
+                self.enter(query, expected)
+                self.assertFalse(self.current().get("ghost"))
+                self.assertEqual(self.line(), query[1:])
+                self.key("<Tab><CR>")
+                self.assertEqual(self.line(), "\\V" + expected)
+                self.assertEqual(self.nvim.api.get_mode()["mode"], "c")
+                self.key("<CR>")
+                self.assertEqual(self.nvim.api.get_mode()["mode"], "n")
+
+    def test_fuzzy_search_smartcase_and_modifiers(self):
+        self.nvim.current.buffer[:] = ["distributed Distributed"]
+        for query, expected in (
+            ("dised", ["distributed", "Distributed"]),
+            ("Dised", ["Distributed"]),
+            ("dised\\C", ["distributed"]),
+            ("Dised\\c", ["distributed", "Distributed"]),
+            ("Dised\\c\\C", ["distributed", "Distributed"]),
+        ):
+            with self.subTest(query=query):
+                self.enter("/" + query)
+                self.wait_for(
+                    lambda expected=expected: (
+                        len(self.current()["items"]) == len(expected)
+                    )
+                )
+                self.assertEqual(
+                    sorted(x["label"] for x in self.current()["items"]),
+                    sorted(expected),
+                )
+                self.key("<Esc>")
+
+    def test_fuzzy_limit_is_applied_after_matching(self):
+        self.configure_fuzzy(completion={"debounce_ms": 20, "max_results": 1})
+        try:
+            self.enter(":edit 中文件", "中文文件.txt")
+            self.assertEqual(len(self.current()["items"]), 1)
+            self.key("<Esc>")
+            self.nvim.current.buffer[:] = ["alpha beta gamma zzz_unique_target"]
+            self.enter("/zztgt", "zzz_unique_target")
+        finally:
+            self.key("<Esc>")
+            self.configure_fuzzy()
+
+    def test_fuzzy_disabled_and_missing_binary_fallback(self):
+        for options in ({"enabled": False}, {"executable": "/nonexistent/fzf"}):
+            with self.subTest(options=options):
+                self.configure_fuzzy(options)
+                try:
+                    self.enter(":set nu", "number")
+                    if "executable" in options:
+                        self.assertIn("not found", self.current()["error"])
+                    self.key("<Esc>")
+                    self.enter("/one")
+                    time.sleep(0.1)
+                    self.assertFalse(self.current()["items"])
+                finally:
+                    self.key("<Esc>")
+                    self.configure_fuzzy()
+
+    def test_fuzzy_ignores_user_fzf_options(self):
+        self.nvim.exec_lua("""
+          _G.sg_fzf_env = { vim.env.FZF_DEFAULT_OPTS, vim.env.FZF_DEFAULT_OPTS_FILE }
+          vim.env.FZF_DEFAULT_OPTS = '--exact --print-query --expect=enter --no-sort'
+          vim.env.FZF_DEFAULT_OPTS_FILE = '/nonexistent/fzf-options'
+        """)
+        try:
+            self.enter(":edit apht", "alpha.txt")
+            self.assertEqual(
+                [x["label"] for x in self.current()["items"]], ["alpha.txt"]
+            )
+        finally:
+            self.nvim.exec_lua("""
+              vim.env.FZF_DEFAULT_OPTS = _G.sg_fzf_env[1]
+              vim.env.FZF_DEFAULT_OPTS_FILE = _G.sg_fzf_env[2]
+            """)
+
+    def test_fuzzy_find_fallback_and_hidden_files(self):
+        hidden = self.cwd / ".secret-file"
+        hidden.touch()
+        self.nvim.exec_lua("""
+          _G.sg_executable = vim.fn.executable
+          vim.fn.executable = function(name)
+            return name == 'fd' and 0 or _G.sg_executable(name)
+          end
+        """)
+        try:
+            self.enter(":edit ad/it", "a-directory/inside.txt")
+            self.key("<Esc>")
+            self.enter(":cd ad", "a-directory/")
+            self.key("<Esc>")
+            self.enter(":edit .sf", ".secret-file")
+            self.key("<Esc>")
+            self.enter(":edit secret")
+            time.sleep(0.2)
+            self.assertFalse(self.current()["items"])
+            self.assertFalse(self.current().get("error"))
+        finally:
+            self.nvim.exec_lua("vim.fn.executable = _G.sg_executable")
+            hidden.unlink()
+
+    def test_fuzzy_search_manual_and_independent_toggles(self):
+        self.configure_fuzzy({"files": False}, {"auto": False})
+        try:
+            self.nvim.current.buffer[:] = ["distributed"]
+            self.enter("/dised")
+            self.assertFalse(self.current()["items"])
+            self.key("<Tab>")
+            self.wait_for(lambda: self.current().get("selected") == 1)
+            self.key("<Right>")
+            self.assertEqual(self.line(), "\\Vdistributed")
+            self.key("<Esc>")
+            self.enter(":edit apht")
+            self.key("<Tab>")
+            self.assertFalse(self.current()["items"])
+            self.key("<Esc>")
+            self.configure_fuzzy({"search": False})
+            self.enter("/dised")
+            time.sleep(0.15)
+            self.assertFalse(self.current()["items"])
+            self.key("<Esc>")
+            self.enter(":set rnu", "relativenumber")
+        finally:
+            self.key("<Esc>")
+            self.configure_fuzzy()
+
+    def test_fuzzy_timeout_and_process_failure(self):
+        script = self.folder / "fzf-failing"
+        for body, timeout in (("exit 2", 1000), ("sleep 2", 50)):
+            with self.subTest(body=body):
+                script.write_text("#!/bin/sh\n" + body + "\n")
+                script.chmod(0o700)
+                self.configure_fuzzy({"executable": str(script), "timeout_ms": timeout})
+                try:
+                    self.enter(":set nu", "number")
+                    self.assertIn("fzf failed", self.current()["error"])
+                    self.assertFalse(self.current()["loading"])
+                finally:
+                    self.key("<Esc>")
+                    self.configure_fuzzy()
+
+    def test_fuzzy_stale_results_and_cancel(self):
+        script = self.folder / "fzf-slow"
+        fzf = self.nvim.funcs.exepath("fzf")
+        script.write_text('#!/bin/sh\nsleep 0.2\nexec "' + fzf + '" "$@"\n')
+        script.chmod(0o700)
+        self.configure_fuzzy({"executable": str(script)})
+        try:
+            self.enter(":set rnu")
+            self.wait_for(lambda: self.current().get("loading"))
+            self.key("<C-u>set sw")
+            self.wait_for(
+                lambda: (
+                    self.current().get("items") and not self.current().get("loading")
+                )
+            )
+            self.assertTrue(all("set " in x["text"] for x in self.current()["items"]))
+            self.assertFalse(
+                any("relativenumber" in x["text"] for x in self.current()["items"])
+            )
+            self.key("<C-u>set rnu")
+            self.wait_for(lambda: self.current().get("loading"))
+            self.key("<Esc>")
+            time.sleep(0.25)
+            self.assertFalse(self.inspect().get("current"))
+        finally:
+            self.key("<Esc>")
+            self.configure_fuzzy()
+
     def test_z_disable_and_reenable(self):
         self.nvim.exec_lua("""
           require('suggestions').disable()

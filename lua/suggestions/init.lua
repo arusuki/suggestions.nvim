@@ -18,6 +18,10 @@ local function active()
 end
 
 local function reset_items(model)
+  if model.cancel then
+    model.cancel()
+    model.cancel = nil
+  end
   model.items, model.selected, model.ghost, model.suggestion = {}, 0, nil, nil
   model.loading, model.error = false, nil
   model.want_select = nil
@@ -98,7 +102,10 @@ local function complete(model, serial)
   if not state.enabled or active() ~= model or model.serial ~= serial then
     return
   end
-  if model.firstc ~= ":" or model.text == "" then
+  if (model.firstc ~= ":" and model.firstc ~= "/" and model.firstc ~= "?") or model.text == "" then
+    return
+  end
+  if model.loading then
     return
   end
   if model.shell and model.pos >= #model.shell then
@@ -123,13 +130,20 @@ local function complete(model, serial)
       queue_render()
     end)
   elseif not model.shell then
-    model.items = completion.ex(model.text, model.pos, state.config.completion.max_results)
-    if model.want_select and #model.items > 0 then
-      model.selected = model.want_select > 0 and 1 or #model.items
-    end
-    model.want_select = nil
-    suggest(model)
-    queue_render()
+    model.loading = true
+    model.cancel = completion.request(model, state.config, function(items, err)
+      if not state.enabled or active() ~= model or model.serial ~= serial then
+        return
+      end
+      model.loading, model.error = false, err
+      model.items = items or {}
+      if model.want_select and #model.items > 0 then
+        model.selected = model.want_select > 0 and 1 or #model.items
+      end
+      model.want_select = nil
+      suggest(model)
+      queue_render()
+    end)
   end
 end
 
@@ -170,7 +184,18 @@ local function on_ui(event, ...)
   local args = { ... }
   if event == "cmdline_show" then
     local chunks, pos, firstc, prompt, indent, level = unpack(args)
-    local model = state.levels[level] or { items = {}, selected = 0, cwd = state.cwd or vim.fn.getcwd() }
+    local previous = active()
+    if previous and previous ~= state.levels[level] then
+      reset_items(previous)
+      previous.identity = nil
+    end
+    local model = state.levels[level]
+      or {
+        items = {},
+        selected = 0,
+        cwd = state.cwd or vim.fn.getcwd(),
+        buf = state.buf or api.nvim_get_current_buf(),
+      }
     model.text, model.pos, model.firstc, model.prompt = flatten(chunks), pos, firstc, prompt
     model.indent, model.special = indent, nil
     state.levels[level] = model
@@ -185,6 +210,9 @@ local function on_ui(event, ...)
       model.special = args[1]
     end
   elseif event == "cmdline_hide" then
+    if state.levels[args[1]] then
+      reset_items(state.levels[args[1]])
+    end
     state.levels[args[1]] = nil
   elseif event == "cmdline_block_show" then
     state.block = {}
@@ -254,7 +282,11 @@ function M._key(action)
     return keycodes("<C-c>")
   end
   local model = active()
-  if not model or vim.fn.getcmdtype() ~= ":" then
+  local cmdtype = vim.fn.getcmdtype()
+  if not model or (cmdtype ~= ":" and cmdtype ~= "/" and cmdtype ~= "?") then
+    return keycodes(fallback)
+  end
+  if cmdtype ~= ":" and (not state.config.fuzzy.enabled or not state.config.fuzzy.search) then
     return keycodes(fallback)
   end
   -- Mappings may run before the next UI redraw has delivered cmdline_show.
@@ -309,6 +341,9 @@ end
 function M.disable()
   state.enabled = false
   state.serial = state.serial + 1
+  for _, model in pairs(state.levels) do
+    reset_items(model)
+  end
   state.levels, state.block = {}, {}
   pcall(vim.ui_detach, ns)
   pcall(api.nvim_del_augroup_by_name, "Suggestions")
@@ -356,6 +391,7 @@ function M.enable()
     group = group,
     callback = function()
       state.cwd = vim.fn.getcwd()
+      state.buf = api.nvim_get_current_buf()
     end,
   })
   api.nvim_create_autocmd("CmdlineLeave", {
@@ -382,6 +418,9 @@ function M.enable()
     group = group,
     callback = function()
       backend.stop()
+      for _, model in pairs(state.levels) do
+        reset_items(model)
+      end
     end,
   })
 end
@@ -424,12 +463,17 @@ function M.toggle()
 end
 
 function M.inspect()
+  local current = vim.deepcopy(active())
+  if current then
+    current.cancel = nil
+  end
   return {
     enabled = state.enabled,
-    current = vim.deepcopy(active()),
+    current = current,
     ui = ui.inspect(),
     backend = backend.status(),
     shell = state.config and state.config.zsh.shell or "zsh",
+    fuzzy = state.config and vim.deepcopy(state.config.fuzzy) or require("suggestions.config").defaults.fuzzy,
   }
 end
 

@@ -33,27 +33,33 @@ function M.ex_history(prefix)
   end
 end
 
-function M.ex(line, pos, limit)
+local function ex_context(line, pos)
   local kind = vim.fn.getcmdcompltype()
   -- Lua user-command callbacks can have an empty completion type even though
   -- getcompletion() supplies matches. Let the native lookup decide.
   local pattern = vim.fn.getcmdcomplpat()
   local before, after = line:sub(1, pos), line:sub(pos + 1)
+  -- getcmdcomplpat() includes the text to the right of the cursor. Only the
+  -- part before it is the query; keep the right-hand text verbatim on insert.
+  if after ~= "" and pattern:sub(-#after) == after then
+    pattern = pattern:sub(1, #pattern - #after)
+  end
   -- Use Neovim's own context parser (spaces in paths, :set, user commands,
   -- Lua expressions, etc.), never guess a replacement range from whitespace.
   if before:sub(#before - #pattern + 1) ~= pattern then
-    return {}
+    return nil
   end
   local prefix = before:sub(1, #before - #pattern)
-  local ok, matches = pcall(vim.fn.getcompletion, before, "cmdline", true)
-  if not ok then
-    return {}
-  end
+  return { kind = kind, query = pattern, prefix = prefix, before = before, after = after }
+end
+
+local function ex_items(context, matches, limit)
+  local kind, prefix, after = context.kind, context.prefix, context.after
   local items = {}
   for _, match in ipairs(matches) do
     local word = match
     if kind == "file" or kind == "dir" or kind == "file_in_path" or kind == "dir_in_path" or kind == "buffer" then
-      word = vim.fn.escape(word, ' \\%#|"')
+      word = vim.fn.fnameescape(word)
     end
     items[#items + 1] = {
       text = prefix .. word .. after,
@@ -66,6 +72,57 @@ function M.ex(line, pos, limit)
     end
   end
   return items
+end
+
+function M.ex(line, pos, limit)
+  local context = ex_context(line, pos)
+  if not context then
+    return {}
+  end
+  local ok, matches = pcall(vim.fn.getcompletion, context.before, "cmdline", true)
+  return ok and ex_items(context, matches, limit) or {}
+end
+
+function M.request(model, config, callback)
+  local fuzzy = config.fuzzy
+  local is_search = model.firstc == "/" or model.firstc == "?"
+  local fallback = not is_search and M.ex(model.text, model.pos, config.completion.max_results) or {}
+  if not fuzzy.enabled or (is_search and not fuzzy.search) then
+    callback(fallback)
+    return
+  end
+  if vim.fn.executable(fuzzy.executable) ~= 1 then
+    callback(fallback, "fzf executable not found: " .. fuzzy.executable)
+    return
+  end
+  local request = require("suggestions.fzf").request(fuzzy)
+  local function finish(items, err)
+    if not items then
+      callback(fallback, err)
+      return
+    end
+    while #items > config.completion.max_results do
+      items[#items] = nil
+    end
+    callback(items)
+  end
+  if is_search then
+    require("suggestions.fuzzy").search(request, model, finish)
+  else
+    local context = ex_context(model.text, model.pos)
+    if not context then
+      callback(fallback)
+      return
+    end
+    context.cwd = model.cwd
+    local handled = require("suggestions.fuzzy").ex(request, context, fuzzy, function(matches, err)
+      finish(matches and ex_items(context, matches, config.completion.max_results), err)
+    end)
+    if not handled then
+      callback(fallback)
+    end
+  end
+  return request.cancel
 end
 
 return M

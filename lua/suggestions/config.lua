@@ -3,6 +3,13 @@ M.defaults = {
   enabled = true,
   ui = { max_height = 10, max_ratio = 0.35, min_height = 3, padding = 2, separator = "─" },
   completion = { debounce_ms = 70, max_results = 80, auto = true },
+  fuzzy = {
+    enabled = true,
+    executable = "fzf",
+    timeout_ms = 2000,
+    files = true,
+    search = true,
+  },
   zsh = {
     shell = "zsh",
     timeout_ms = 1800,
@@ -30,6 +37,14 @@ M.defaults = {
 function M.resolve(opts)
   local result = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), opts or {})
   assert(type(result.zsh.shell) == "string", "suggestions: zsh.shell must be a path")
+  assert(type(result.fuzzy.executable) == "string", "suggestions: fuzzy.executable must be a path")
+  assert(
+    type(result.fuzzy.timeout_ms) == "number" and result.fuzzy.timeout_ms > 0,
+    "suggestions: fuzzy.timeout_ms must be positive"
+  )
+  for _, key in ipairs({ "enabled", "files", "search" }) do
+    assert(type(result.fuzzy[key]) == "boolean", "suggestions: fuzzy." .. key .. " must be a boolean")
+  end
   for _, key in ipairs({ "max_height", "min_height", "padding" }) do
     assert(
       type(result.ui[key]) == "number" and result.ui[key] >= 0,
