@@ -54,7 +54,7 @@ function M.request(config)
       "--no-extended",
       "--algo=v2",
       "--sort",
-      "--tiebreak=index",
+      "--tiebreak=length,index",
       "--filter=" .. query,
     }
     -- Smart-case is fzf's default. Use the short case flags because older

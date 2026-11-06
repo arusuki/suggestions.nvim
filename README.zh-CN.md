@@ -75,7 +75,7 @@ require("suggestions").setup()
 - 文件和目录从最近的 `.git` / `.hg` 项目根目录递归收集；没有项目标记则使用发起窗口的工作目录。插入路径相对于该窗口，支持 `:lcd`。例如 `:edit lsc` 可匹配 `lua/suggestions/completion.lua`。`fd` 遵循 ignore 文件；`find` 回退跳过隐藏项，但不读取 ignore 文件。查询以 `.` 开头或包含 `/.` 时包含隐藏项，始终排除 `.git` / `.hg`。以 `~`、`/`、`\\`、`..`、`%`、`#`、`<`、`$` 开头，以及含通配符或环境变量的路径交回原生补全。
 - `/`、`?` 按当前 buffer 的 `iskeyword` 收集完整且去重的关键词。`/dised` 可匹配 `distributed`，`/ac` 可匹配 `a_b_c`。默认 smartcase，显式 `\c` / `\C` 覆盖大小写规则。采纳后插入 `\V` 字面搜索，保留显式大小写修饰符和搜索方向。搜索不显示灰字；Tab 选择，Right 或 Enter 采纳，再按 Enter 执行搜索。
 
-匹配和排序通过异步 `fzf --filter` 完成，使用普通模糊查询，关闭 fzf 扩展运算符。`completion.max_results` 在**匹配之后**应用。用户的 `FZF_DEFAULT_OPTS` 和 `FZF_DEFAULT_OPTS_FILE` 不影响后端。新输入、关闭、reload 和禁用会取消过期任务；错误或超时时保留原生 Ex 候选，可在 `inspect().current.error` 查看原因。
+匹配和排序通过异步 `fzf --filter` 完成，使用普通模糊查询，关闭 fzf 扩展运算符。同分时优先较短的候选，长度也相同时保留原始候选顺序。`completion.max_results` 在**匹配之后**应用。用户的 `FZF_DEFAULT_OPTS` 和 `FZF_DEFAULT_OPTS_FILE` 不影响后端。新输入、关闭、reload 和禁用会取消过期任务；错误或超时时保留原生 Ex 候选，可在 `inspect().current.error` 查看原因。
 
 Shell 补全及前缀历史建议继续使用 zsh。设置 `fuzzy.enabled = false` 恢复原生 Ex 补全并关闭搜索候选；`fuzzy.files = false` 单独保留原生文件补全；`fuzzy.search = false` 单独关闭搜索候选。
 

@@ -143,6 +143,9 @@ selects, Right/Enter accepts, and a subsequent Enter executes. Accepted words
 use literal \V search syntax, preserving explicit case modifiers. No search
 ghost text is shown. The search direction remains native.
 
+Equal scores prefer shorter candidates, then preserve the original candidate
+order.
+
 max_results limits results after fzf matching. Queries use ordinary fuzzy
 matching, without extended fzf operators. FZF_DEFAULT_OPTS and its options file
 are ignored. Jobs are asynchronous, cancellable, and bounded by timeout_ms per
