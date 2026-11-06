@@ -8,7 +8,7 @@ with find as fallback. Missing fzf falls back to native Ex completion.
 Add the plugin to runtimepath, then: >lua
     require('suggestions').setup()
 <
-Type :! to request native zsh completion. Right accepts history ghost text;
+Type a command after :! to request zsh completion. Right accepts history ghost text;
 Alt-f accepts one word. Tab/S-Tab select a completion; Enter confirms an
 explicit selection, or executes the current command when nothing is selected.
 After Enter confirms a selection, candidates and ghost text stay hidden until
@@ -35,7 +35,10 @@ CONFIGURATION                                           *suggestions-config*
 >lua
     require('suggestions').setup({
       ui = { max_height = 10, max_ratio = 0.35, min_height = 3, padding = 2 },
-      completion = { auto = true, debounce_ms = 70, max_results = 80 },
+      completion = {
+        auto = true, debounce_ms = 70, max_results = 80,
+        empty = 'none', history_limit = 10,
+      },
       input = { enabled = false, completion = 'native', rules = {} },
       fuzzy = {
         enabled = true, executable = 'fzf', timeout_ms = 2000,
@@ -55,6 +58,27 @@ lua/suggestions/config.lua. Startup files supply compdef, fpath and aliases.
 Zsh history is loaded at worker startup; session commands stay in memory. The
 plugin never writes the user's HISTFILE. Completion text is read as data;
 normal user-defined completion functions may still execute helper commands.
+
+EMPTY INPUT                                             *suggestions-empty*
+
+completion.empty defaults to 'none': empty or whitespace-only input shows no
+candidates or ghost text, even with Tab. This includes a bare :!, range/filter
+shell forms, search, and enabled input prompts. Arguments after a command
+(e.g. :edit or :!ls followed by a space) still complete normally.
+
+Set completion.empty='history' to show only recent history for empty input:
+  Ex                      Native ':' history, including ShaDa/session entries.
+  / and ?                 Native search history, preserving search patterns.
+  Shell / shell input     Zsh history plus commands submitted in this session.
+  Other enabled input     Neovim's shared input history.
+
+History is newest first, deduplicated, without blank or multiline entries.
+completion.history_limit is a positive integer (default 10), capped by
+completion.max_results. Empty history never falls back to ordinary completion.
+No ghost text or automatic selection appears on empty input. Tab selects;
+Enter confirms, then another Enter executes. completion.auto=false requires
+Tab to request history. Disabled search/input completion also hides its history.
+zsh.history_limit independently limits the history loaded from disk.
 
 INPUT COMPLETION                                        *suggestions-input*
 

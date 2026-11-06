@@ -379,6 +379,190 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.line(), "set nu")
         self.wait_for(lambda: self.current().get("ghost"), "restored Ex ghost")
 
+    def test_empty_default_suppresses_completion(self):
+        self.configure_fuzzy()
+        self.addCleanup(self.configure_fuzzy)
+        self.nvim.funcs.histadd(":", "set number")
+        for command in (
+            ":",
+            ":   ",
+            ":!",
+            ":!  ",
+            ":2,4!",
+            ":read !",
+            ":write !",
+            "/",
+            "?",
+        ):
+            with self.subTest(command=command):
+                self.enter(command)
+                self.assert_completion_closed()
+                for key in ("<Tab>", "<S-Tab>"):
+                    self.key(key)
+                    self.assert_completion_closed()
+                self.assertFalse(self.inspect()["backend"]["running"])
+                self.key("<Esc>")
+        self.configure_input({"enabled": True, "completion": "shell"})
+        self.enter_input()
+        self.assert_completion_closed()
+        self.key("<Tab>")
+        self.assert_completion_closed()
+        self.assertFalse(self.inspect()["backend"]["running"])
+
+    def test_empty_clearing_discards_pending_results(self):
+        self.configure_fuzzy()
+        self.addCleanup(self.configure_fuzzy)
+        self.enter(":!sg-slow ")
+        self.wait_for(lambda: self.current().get("loading"), "pending shell completion")
+        self.key("<C-u>!")
+        self.wait_for(lambda: not self.inspect()["backend"]["pending"])
+        self.assertEqual(self.line(), "!")
+        self.assert_completion_closed()
+        self.key("sg-test --")
+        self.wait_for(lambda: len(self.current()["items"]) == 3, "resumed completion")
+        self.key("<C-u>")
+        self.assert_completion_closed()
+
+    def test_empty_ex_history_limits_and_confirmation(self):
+        self.configure_fuzzy(completion={"empty": "history", "history_limit": 2})
+        self.addCleanup(self.configure_fuzzy)
+        for entry in (
+            "set number",
+            "let g:sg_empty_history = 1",
+            "let g:sg_empty_history = 2",
+            "echo 'multiline'\necho 'skip'",
+            "   ",
+        ):
+            self.nvim.funcs.histadd(":", entry)
+        self.enter(":")
+        self.wait_for(
+            lambda: len(self.current()["items"]) == 2, "Ex history candidates"
+        )
+        self.assertEqual(
+            [item["text"] for item in self.current()["items"]],
+            ["let g:sg_empty_history = 2", "let g:sg_empty_history = 1"],
+        )
+        self.assertTrue(all(x["source"] == "history" for x in self.current()["items"]))
+        self.assertEqual(self.current()["selected"], 0)
+        self.assertFalse(self.current().get("ghost"))
+        self.key("<S-Tab>")
+        self.key("<CR>")
+        self.assertEqual(self.line(), "let g:sg_empty_history = 1")
+        self.assertNotIn("sg_empty_history", self.nvim.vars)
+        self.assert_completion_closed()
+        self.key("<CR>")
+        self.assertEqual(self.nvim.vars["sg_empty_history"], 1)
+        self.nvim.funcs.histdel(":")
+        self.enter(":")
+        self.assert_completion_closed()
+        self.key("<Tab>")
+        self.assert_completion_closed()
+
+    def test_empty_shell_history_loads_without_completing(self):
+        self.configure_fuzzy(
+            completion={"empty": "history", "history_limit": 3, "max_results": 2}
+        )
+        self.addCleanup(self.configure_fuzzy)
+        self.nvim.exec_lua("""
+            local backend = require('suggestions.backend')
+            _G.sg_request = backend.request
+            backend.request = function() error('empty input requested ZLE completion') end
+        """)
+        self.addCleanup(
+            self.nvim.exec_lua,
+            "require('suggestions.backend').request = _G.sg_request",
+        )
+        self.assertFalse(self.inspect()["backend"]["running"])
+        for prefix in ("!", "2,4!", "read !", "write !"):
+            with self.subTest(prefix=prefix):
+                self.enter(":" + prefix)
+                self.wait_for(
+                    lambda: len(self.current()["items"]) == 2, "shell history"
+                )
+                self.assertEqual(
+                    [item["text"] for item in self.current()["items"]],
+                    [prefix + "echo 中文 history", prefix + "git status --branch"],
+                )
+                self.assertFalse(self.current().get("ghost"))
+                self.key("<Tab>")
+                self.key("<CR>")
+                self.assertEqual(self.line(), prefix + "echo 中文 history")
+                self.assertEqual(
+                    self.nvim.funcs.getcmdpos(), len(self.line().encode()) + 1
+                )
+                self.assert_completion_closed()
+                self.key("<Esc>")
+        self.nvim.exec_lua("""
+            local backend = require('suggestions.backend')
+            backend.remember('echo 中文 history')
+            backend.remember('echo newest')
+            backend.remember('echo newest')
+            backend.remember('echo multiline\\nignored')
+        """)
+        self.enter(":! ")
+        self.wait_for(
+            lambda: len(self.current()["items"]) == 2, "unique session history"
+        )
+        self.assertEqual(
+            [item["text"] for item in self.current()["items"]],
+            ["!echo newest", "!echo 中文 history"],
+        )
+
+    def test_empty_history_manual_search_and_input(self):
+        options = {"empty": "history", "history_limit": 1}
+        self.configure_fuzzy(completion={**options, "auto": False})
+        self.addCleanup(self.configure_fuzzy)
+        self.nvim.funcs.histdel("/")
+        self.addCleanup(self.nvim.funcs.histdel, "/")
+        self.nvim.funcs.histadd("/", r"\<one\>")
+        for firstc in ("/", "?"):
+            self.enter(firstc)
+            self.assert_completion_closed()
+            self.key("<Tab>")
+            self.assertEqual(self.current()["selected"], 1)
+            self.key("<Right>")
+            self.assertEqual(self.line(), r"\<one\>")
+            self.assertEqual(self.nvim.funcs.getcmdtype(), firstc)
+            self.key("<Esc>")
+        self.configure_input({"enabled": True}, auto=False, completion=options)
+        self.nvim.funcs.histdel("@")
+        self.addCleanup(self.nvim.funcs.histdel, "@")
+        self.nvim.funcs.histadd("@", "native input history")
+        self.enter_input()
+        self.assert_completion_closed()
+        self.key("<Tab>")
+        self.assertEqual(self.current()["items"][0]["text"], "native input history")
+        self.key("<CR>")
+        self.assert_completion_closed()
+        self.key("<CR>")
+        self.wait_for(lambda: self.nvim.exec_lua("return _G.sg_input_done"))
+        self.assertEqual(
+            self.nvim.exec_lua("return _G.sg_input_result"), "native input history"
+        )
+        self.configure_input(
+            {"enabled": True, "completion": "shell"}, completion=options
+        )
+        self.enter_input()
+        self.wait_for(lambda: len(self.current()["items"]) == 1, "shell input history")
+        self.assertEqual(self.current()["items"][0]["text"], "echo 中文 history")
+
+    def test_empty_invalid_configuration(self):
+        for options in (
+            {"empty": True},
+            {"empty": "complete"},
+            {"history_limit": 0},
+            {"history_limit": -1},
+            {"history_limit": 1.5},
+            {"history_limit": "10"},
+        ):
+            with self.subTest(options=options):
+                ok, error = self.nvim.exec_lua(
+                    "return {pcall(require('suggestions.config').resolve, {completion = ...})}",
+                    options,
+                )
+                self.assertFalse(ok)
+                self.assertIn("completion.", error)
+
     def test_ex_unaccepted_ghost_does_not_execute(self):
         self.nvim.funcs.histadd(":", "let g:suggestions_actual = 10")
         self.enter(":let g:suggestions_actual = 1")
@@ -654,12 +838,13 @@ class Integration(unittest.TestCase):
             str(self.folder / "history"),
         )
 
-    def configure_input(self, options=None, auto=True):
+    def configure_input(self, options=None, auto=True, completion=None):
         self.nvim.exec_lua(
             """
             require('suggestions').setup({
               input = select(1, ...),
-              completion = { debounce_ms = 20, auto = select(2, ...) },
+              completion = vim.tbl_extend('force',
+                { debounce_ms = 20, auto = select(2, ...) }, select(5, ...)),
               zsh = { env = { ZDOTDIR = select(3, ...) }, history_file = select(4, ...) },
             })
             """,
@@ -667,6 +852,7 @@ class Integration(unittest.TestCase):
             auto,
             str(self.folder),
             str(self.folder / "history"),
+            completion or {},
         )
 
     def enter_input(self, prompt="Compile command: ", default="", completion=None):
@@ -830,9 +1016,11 @@ class Integration(unittest.TestCase):
         self.configure_input({"enabled": True})
         self.addCleanup(self.configure_fuzzy)
         self.enter_input(completion="customlist,SgInputComplete")
-        self.wait_for(
-            lambda: len(self.current()["items"]) == 2, "empty input custom completion"
-        )
+        self.assert_completion_closed()
+        self.assertNotIn("sg_input_args", self.nvim.vars)
+        self.key("<Tab>")
+        self.assert_completion_closed()
+        self.assertNotIn("sg_input_args", self.nvim.vars)
         self.key("中文")
         self.wait_for(
             lambda: len(self.current()["items"]) == 2, "unicode input custom completion"

@@ -33,6 +33,24 @@ function M.ex_history(prefix)
   end
 end
 
+function M.history(kind, limit)
+  local entries, seen = {}, {}
+  for index = 1, vim.o.history do
+    local entry = vim.fn.histget(kind, -index)
+    if entry == "" then
+      break
+    end
+    if entry:find("%S") and not entry:find("[\r\n]") and not seen[entry] then
+      seen[entry] = true
+      entries[#entries + 1] = entry
+      if #entries >= limit then
+        break
+      end
+    end
+  end
+  return entries
+end
+
 local function ex_context(line, pos)
   local kind = vim.fn.getcmdcompltype()
   -- Lua user-command callbacks can have an empty completion type even though

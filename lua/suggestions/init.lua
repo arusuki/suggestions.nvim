@@ -27,12 +27,16 @@ local function reset_items(model)
   model.want_select = nil
 end
 
+local function empty(model)
+  return not model.text:sub(#(model.shell or "") + 1):find("%S")
+end
+
 local function suggest(model)
   model.ghost, model.suggestion = nil, nil
   if
     (model.firstc ~= ":" and not (model.input and model.input.enabled))
     or model.pos ~= #model.text
-    or model.text == ""
+    or empty(model)
   then
     return
   end
@@ -50,9 +54,6 @@ local function suggest(model)
   end
   local prefix = model.shell or ""
   local text = model.text:sub(#prefix + 1)
-  if text == "" then
-    return
-  end
   local history
   if model.shell then
     history = backend.history(text, 1)[1]
@@ -109,51 +110,67 @@ local function complete(model, serial)
   if model.input and not model.input.enabled then
     return
   end
+  if not model.input and model.firstc ~= ":" and model.firstc ~= "/" and model.firstc ~= "?" then
+    return
+  end
   if
-    (not model.input and model.firstc ~= ":" and model.firstc ~= "/" and model.firstc ~= "?")
-    or (not model.input and model.text == "")
+    (model.firstc == "/" or model.firstc == "?")
+    and (not state.config.fuzzy.enabled or not state.config.fuzzy.search)
   then
     return
   end
   if model.loading then
     return
   end
-  if model.shell and model.pos >= #model.shell then
-    model.loading = true
-    local prefix, text, pos = model.shell, model.text:sub(#model.shell + 1), model.pos - #model.shell
-    backend.request(text, pos, model.cwd, function(items, err)
-      if not state.enabled or active() ~= model or model.serial ~= serial then
-        return
-      end
-      model.loading, model.error = false, err
-      model.items = {}
-      for _, item in ipairs(items or {}) do
+  local function finish(items, err)
+    if not state.enabled or active() ~= model or model.serial ~= serial then
+      return
+    end
+    model.loading, model.error = false, err
+    model.items = items or {}
+    if model.shell then
+      local prefix = model.shell
+      for _, item in ipairs(model.items) do
         item.label = item.text
         item.text, item.cursor = prefix .. item.text, #prefix + item.cursor
-        model.items[#model.items + 1] = item
       end
-      if model.want_select and #model.items > 0 then
-        model.selected = model.want_select > 0 and 1 or #model.items
-      end
+    end
+    if model.want_select and #model.items > 0 then
+      model.selected = model.want_select > 0 and 1 or #model.items
+    end
+    model.want_select = nil
+    suggest(model)
+    queue_render()
+  end
+  if model.shell and model.pos < #model.shell then
+    return
+  end
+  if empty(model) then
+    if state.config.completion.empty == "none" then
       model.want_select = nil
-      suggest(model)
-      queue_render()
-    end)
+      return
+    end
+    local limit = math.min(state.config.completion.history_limit, state.config.completion.max_results)
+    local function finish_history(entries, err)
+      local items = {}
+      for _, entry in ipairs(entries or {}) do
+        items[#items + 1] = { text = entry, cursor = #entry, label = entry, source = "history" }
+      end
+      finish(items, err)
+    end
+    model.loading = true
+    if model.shell then
+      backend.request_history(limit, finish_history)
+    else
+      finish_history(completion.history(model.input and "@" or model.firstc, limit))
+    end
+  elseif model.shell then
+    model.loading = true
+    local prefix = model.shell
+    backend.request(model.text:sub(#prefix + 1), model.pos - #prefix, model.cwd, finish)
   elseif not model.shell then
     model.loading = true
-    model.cancel = completion.request(model, state.config, function(items, err)
-      if not state.enabled or active() ~= model or model.serial ~= serial then
-        return
-      end
-      model.loading, model.error = false, err
-      model.items = items or {}
-      if model.want_select and #model.items > 0 then
-        model.selected = model.want_select > 0 and 1 or #model.items
-      end
-      model.want_select = nil
-      suggest(model)
-      queue_render()
-    end)
+    model.cancel = completion.request(model, state.config, finish)
   end
 end
 

@@ -2,7 +2,7 @@ local M = {}
 M.defaults = {
   enabled = true,
   ui = { max_height = 10, max_ratio = 0.35, min_height = 3, padding = 2, separator = "─" },
-  completion = { debounce_ms = 70, max_results = 80, auto = true },
+  completion = { debounce_ms = 70, max_results = 80, auto = true, empty = "none", history_limit = 10 },
   input = { enabled = false, completion = "native", rules = {} },
   highlights = { match = {}, selected_match = {} },
   fuzzy = {
@@ -85,6 +85,17 @@ function M.resolve(opts)
   assert(result.ui.max_ratio > 0 and result.ui.max_ratio <= 1, "suggestions: max_ratio must be in (0, 1]")
   assert(result.completion.max_results >= 1, "suggestions: max_results must be positive")
   assert(result.completion.debounce_ms >= 0, "suggestions: debounce_ms must be nonnegative")
+  assert(
+    result.completion.empty == "none" or result.completion.empty == "history",
+    'suggestions: completion.empty must be "none" or "history"'
+  )
+  assert(
+    type(result.completion.history_limit) == "number"
+      and result.completion.history_limit >= 1
+      and result.completion.history_limit < math.huge
+      and result.completion.history_limit % 1 == 0,
+    "suggestions: completion.history_limit must be a positive integer"
+  )
   assert(result.zsh.timeout_ms > 0 and result.zsh.startup_timeout_ms > 0, "suggestions: timeouts must be positive")
   assert(result.zsh.history_limit > 0, "suggestions: history_limit must be positive")
   assert(type(result.ui.separator) == "string", "suggestions: ui.separator must be a string")

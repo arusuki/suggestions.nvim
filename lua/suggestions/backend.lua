@@ -150,6 +150,10 @@ dispatch = function()
   end
   local request = state.queued
   state.queued = nil
+  if request.history_limit then
+    request.callback(M.history("", request.history_limit))
+    return
+  end
   state.sequence = state.sequence + 1
   request.id = state.sequence
   local data = table.concat(
@@ -185,30 +189,40 @@ function M.reload()
   return ok, err
 end
 
-function M.request(text, cursor, cwd, callback)
-  if text:find("%z") or cwd:find("%z") then
-    callback({}, "NUL is not supported")
-    return
-  end
+local function enqueue(request)
   -- Latest request wins; the in-flight request is still consumed before reuse.
   if state.queued then
     state.queued.callback(nil, "superseded")
   end
-  state.queued = { text = text, cursor = cursor, cwd = cwd, callback = callback }
+  state.queued = request
   local ok, err = start()
   if not ok then
     state.queued = nil
     state.last_error = err
-    callback(nil, err)
+    request.callback(nil, err)
     return
   end
   dispatch()
 end
 
+function M.request(text, cursor, cwd, callback)
+  if text:find("%z") or cwd:find("%z") then
+    callback({}, "NUL is not supported")
+    return
+  end
+  enqueue({ text = text, cursor = cursor, cwd = cwd, callback = callback })
+end
+
+function M.request_history(limit, callback)
+  -- Load disk history on first use without running ZLE completion for an
+  -- empty command (which would enumerate commands or files).
+  enqueue({ history_limit = limit, callback = callback })
+end
+
 function M.history(prefix, limit)
   local result, seen = {}, {}
   for _, entry in ipairs(state.history) do
-    if entry:sub(1, #prefix) == prefix and not seen[entry] and not entry:find("[\r\n]") then
+    if entry:sub(1, #prefix) == prefix and entry:find("%S") and not seen[entry] and not entry:find("[\r\n]") then
       seen[entry] = true
       result[#result + 1] = entry
       if #result >= (limit or 100) then
