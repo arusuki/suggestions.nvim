@@ -78,7 +78,6 @@ local function render()
   local model = active()
   if not model then
     ui.close()
-    vim.cmd.redraw()
     return
   end
   refresh(model)
@@ -448,6 +447,9 @@ function M.enable()
   api.nvim_create_autocmd("CmdlineLeave", {
     group = group,
     callback = function()
+      -- Restore the layout before the command can print messages or open a
+      -- hit-enter prompt. Scheduled cleanup would erase that output.
+      ui.close()
       if vim.fn.getcmdtype() == ":" and not vim.v.event.abort then
         local text = vim.fn.getcmdline()
         local prefix = completion.shell_prefix(text)

@@ -72,6 +72,7 @@ class Integration(unittest.TestCase):
         )
         cls.addClassCleanup(cls.close_nvim)
         cls.nvim.ui_attach(100, 32, rgb=True, ext_linegrid=True)
+        cls._screen = None
         cls.nvim.exec_lua("vim.opt.runtimepath:prepend(...)", str(ROOT))
         cls.nvim.command("runtime plugin/suggestions.lua")
         cls.nvim.command("cd " + cls.nvim.funcs.fnameescape(str(cls.cwd)))
@@ -158,6 +159,17 @@ class Integration(unittest.TestCase):
 
     def line(self):
         return self.nvim.funcs.getcmdline()
+
+    @classmethod
+    def screen(cls):
+        from preview import Screen
+
+        # Keep the grid across captures: UI notifications contain changes,
+        # not a fresh screen (or highlight definitions) on every redraw.
+        if cls._screen is None:
+            cls._screen = Screen()
+        cls._screen.read(cls.nvim)
+        return cls._screen
 
     def assert_completion_closed(self):
         # Wait past the debounce so an automatic reopen cannot pass unnoticed.
@@ -569,6 +581,41 @@ class Integration(unittest.TestCase):
         self.wait_for(lambda: self.current().get("ghost") == "0", "unaccepted suffix")
         self.key("<CR>")
         self.assertEqual(self.nvim.vars["suggestions_actual"], 1)
+
+    def test_command_output_survives_submission(self):
+        original_height = self.nvim.options["cmdheight"]
+        self.addCleanup(self.nvim.options.__setitem__, "cmdheight", original_height)
+        for height in (0, 1):
+            for submit in ("<CR>", "<C-j>"):
+                for command, output in (
+                    (':echo "sg-ex-output"', "sg-ex-output"),
+                    (":!echo sg-shell-output", "sg-shell-output"),
+                    (":!echo sg-shell-error >&2", "sg-shell-error"),
+                    (':echoerr "sg-ex-error"', "sg-ex-error"),
+                ):
+                    with self.subTest(height=height, submit=submit, command=command):
+                        self.nvim.options["cmdheight"] = height
+                        self.enter(command)
+                        self.screen()
+                        try:
+                            self.key(submit)
+                            # Only fast RPCs while a native hit-enter prompt
+                            # is blocking; ordinary RPCs would dismiss it.
+                            screen = self.screen()
+                            self.assertIn(
+                                output,
+                                [
+                                    "".join(cell[0] for cell in row).strip()
+                                    for row in screen.cells
+                                ],
+                            )
+                            if command.startswith(":!"):
+                                self.assertEqual(self.nvim.api.get_mode()["mode"], "r")
+                        finally:
+                            self.key("<C-c>")
+                            self.nvim.command("messages clear")
+                        self.wait_for(lambda: not self.current(), "output closed")
+                        self.assertEqual(self.nvim.options["cmdheight"], height)
 
     def test_ex_file_ghost_preserves_escaping_and_unicode(self):
         for prefix, expected in (
@@ -1333,8 +1380,6 @@ class Integration(unittest.TestCase):
             self.nvim.ui_try_resize(100, 32)
 
     def test_fuzzy_highlight_colors_survive_colorscheme(self):
-        from preview import Screen
-
         self.nvim.exec_lua("""
           require('suggestions').setup({
             highlights = {
@@ -1358,8 +1403,7 @@ class Integration(unittest.TestCase):
                 self.nvim.command("colorscheme default")
             self.enter(":edit spft", "space\\ file.txt")
             self.wait_for(lambda: self.drawer_match_marks())
-            screen = Screen()
-            screen.read(self.nvim)
+            screen = self.screen()
             row = next(
                 row
                 for row in screen.cells
