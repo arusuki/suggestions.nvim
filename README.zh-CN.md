@@ -177,6 +177,18 @@ vim.opt.shellcmdflag = "-ic"
 
 可覆盖以下高亮组：`SuggestionsNormal`、`SuggestionsMuted`、`SuggestionsGhost`、`SuggestionsBorder`、`SuggestionsAccent`、`SuggestionsSelection`。默认配色取自当前主题，并在 `ColorScheme` 后重新适配。
 
+Shell 输入（`:!`、过滤命令及配置为 shell 补全的 input 提示）的提示符和顶部分隔线默认使用柔和的淡粉色。颜色会混合当前主题的前景与背景；浅色主题使用更深的玫瑰色保持可读性，切换主题后自动重新适配。通过 `highlights.shell` 可同时配置这两处的颜色及其他 `nvim_set_hl` 属性，设置后会在切换主题时保留：
+
+```lua
+require("suggestions").setup({
+  highlights = {
+    shell = { fg = "#d4abbd" }, -- 自定义粉色；留空 {} 则跟随主题自动调和
+  },
+})
+```
+
+未配置 `highlights.shell` 时，也可通过 `vim.api.nvim_set_hl` 分别覆盖 `SuggestionsShellAccent`（提示符）与 `SuggestionsShellBorder`（顶部分隔线）。
+
 模糊匹配字符使用 `SuggestionsMatch` 和 `SuggestionsSelectedMatch`，分别对应普通候选和选中候选。默认使用主题强调色并加粗，保留选中行的背景色。可以通过 setup 配置颜色及其他 `nvim_set_hl` 属性，切换主题后会重新应用：
 
 ```lua

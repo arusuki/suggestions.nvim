@@ -179,6 +179,18 @@ Each `:!` is still a separate command execution, not a persistent terminal sessi
 
 Override these highlight groups to customize the appearance: `SuggestionsNormal`, `SuggestionsMuted`, `SuggestionsGhost`, `SuggestionsBorder`, `SuggestionsAccent`, and `SuggestionsSelection`. Defaults follow the current theme and refresh on `ColorScheme`.
 
+Shell input (`:!`, filter commands, and input prompts configured for shell completion) uses a soft pink prompt and top separator. The default blends rose with the theme's foreground and background, using a deeper shade for legibility on light themes, and refreshes after `ColorScheme`. Configure both through `highlights.shell`; colors and other `nvim_set_hl` attributes set here survive theme changes:
+
+```lua
+require("suggestions").setup({
+  highlights = {
+    shell = { fg = "#d4abbd" }, -- Custom pink; leave empty {} for theme blending.
+  },
+})
+```
+
+With empty shell options, you can override `SuggestionsShellAccent` (prompt) and `SuggestionsShellBorder` (top separator) separately through `vim.api.nvim_set_hl`.
+
 Fuzzy matches use `SuggestionsMatch` and `SuggestionsSelectedMatch`. Both default to the theme's accent color with bold text, preserving the selected row's background. Configure colors and other `nvim_set_hl` attributes through setup; these overrides are reapplied after `ColorScheme`:
 
 ```lua

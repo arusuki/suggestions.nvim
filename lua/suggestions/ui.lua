@@ -21,6 +21,9 @@ function M.highlights(config)
   local bg = normal.bg or (dark and 0x14161b or 0xf4f4f4)
   local fg = normal.fg or (dark and 0xe0e2ea or 0x24262d)
   local surface = normal.bg and blend(bg, fg, 0.035) or nil
+  -- Mix rose with the theme's foreground/background for a soft, cohesive tint.
+  -- Light themes need a deeper base to keep the prompt and separator legible.
+  local pink = blend(blend(dark and 0xf2b8cf or 0xa64b70, fg, 0.18), bg, 0.12)
   local groups = {
     Normal = { fg = fg, bg = surface },
     Muted = { fg = comment.fg or blend(bg, fg, 0.5), bg = surface },
@@ -34,10 +37,21 @@ function M.highlights(config)
     api.nvim_set_hl(0, "Suggestions" .. name, value)
   end
   local configured = {}
-  for key, name in pairs({ match = "Match", selected_match = "SelectedMatch" }) do
+  local defaults = {
+    ShellAccent = { fg = pink, bg = surface, bold = true },
+    ShellBorder = { fg = pink, bg = surface },
+    Match = { fg = accent.fg or 0x89b4fa, bold = true },
+    SelectedMatch = { fg = accent.fg or 0x89b4fa, bold = true },
+  }
+  for name, key in pairs({
+    ShellAccent = "shell",
+    ShellBorder = "shell",
+    Match = "match",
+    SelectedMatch = "selected_match",
+  }) do
     local override = config and config[key] or {}
     configured[key] = next(override) ~= nil
-    local value = vim.tbl_extend("force", { fg = accent.fg or 0x89b4fa, bold = true }, override)
+    local value = vim.tbl_extend("force", defaults[name], override)
     -- Explicit setup options survive ColorScheme. With no options, allow the
     -- usual nvim_set_hl overrides; reset colors previously managed by setup.
     value.default = not configured[key] and not (state.configured_highlights or {})[key]
@@ -230,7 +244,7 @@ function M.render(model, config)
   vim.bo[state.buf].modifiable = true
   api.nvim_buf_set_lines(state.buf, 0, -1, false, lines)
   api.nvim_buf_clear_namespace(state.buf, ns, 0, -1)
-  mark(0, 0, #lines[1], "SuggestionsBorder")
+  mark(0, 0, #lines[1], model.shell and "SuggestionsShellBorder" or "SuggestionsBorder")
   mark(0, #separator, math.min(#lines[1], #separator + #left), "SuggestionsMuted")
   mark(0, math.max(0, #lines[1] - #right), #lines[1], "SuggestionsMuted")
   for _, row in ipairs(rows) do
@@ -252,7 +266,7 @@ function M.render(model, config)
       end
     end
   end
-  mark(prompt_row, 0, #prefix, "SuggestionsAccent")
+  mark(prompt_row, 0, #prefix, model.shell and "SuggestionsShellAccent" or "SuggestionsAccent")
   mark(prompt_row, #prefix + #visible, #prefix + #visible + #ghost, "SuggestionsGhost")
   local cursor = #prefix + math.max(0, pos - offset)
   api.nvim_win_set_cursor(state.win, { prompt_row + 1, cursor })

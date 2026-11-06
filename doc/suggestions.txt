@@ -181,9 +181,25 @@ SuggestionsMuted        Secondary labels and hints.
 SuggestionsGhost        Inline predicted suffix.
 SuggestionsBorder       Top separator.
 SuggestionsAccent       Prompt.
+SuggestionsShellAccent  Shell prompt, theme-blended pink by default.
+SuggestionsShellBorder  Shell top separator, matching the shell prompt.
 SuggestionsSelection    Explicitly selected candidate.
 SuggestionsMatch        Matched characters in fuzzy candidates.
 SuggestionsSelectedMatch Matched characters in the selected fuzzy candidate.
+
+Shell input (:!, filters, and input prompts with shell completion) uses soft
+pink for the prompt and top separator. Defaults blend rose with the current
+theme's foreground/background, with a deeper shade on light backgrounds.
+Colors refresh on ColorScheme. Configure both together (also reapplied after
+ColorScheme): >lua
+    require('suggestions').setup({
+      highlights = {
+        shell = { fg = '#d4abbd' }, -- Empty {} uses theme-blended defaults.
+      },
+    })
+<
+shell accepts nvim_set_hl attributes. With empty shell options, nvim_set_hl
+can override SuggestionsShellAccent and SuggestionsShellBorder separately.
 
 Configure match colors with nvim_set_hl attributes (reapplied on ColorScheme):
 >lua

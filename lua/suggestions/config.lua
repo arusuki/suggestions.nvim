@@ -4,7 +4,7 @@ M.defaults = {
   ui = { max_height = 10, max_ratio = 0.35, min_height = 3, padding = 2, separator = "─" },
   completion = { debounce_ms = 70, max_results = 80, auto = true, empty = "none", history_limit = 10 },
   input = { enabled = false, completion = "native", rules = {} },
-  highlights = { match = {}, selected_match = {} },
+  highlights = { shell = {}, match = {}, selected_match = {} },
   fuzzy = {
     enabled = true,
     executable = "fzf",
@@ -72,7 +72,7 @@ function M.resolve(opts)
   for _, key in ipairs({ "enabled", "files", "search", "highlight" }) do
     assert(type(result.fuzzy[key]) == "boolean", "suggestions: fuzzy." .. key .. " must be a boolean")
   end
-  for _, key in ipairs({ "match", "selected_match" }) do
+  for _, key in ipairs({ "shell", "match", "selected_match" }) do
     assert(type(result.highlights[key]) == "table", "suggestions: highlights." .. key .. " must be a table")
   end
   for _, key in ipairs({ "max_height", "min_height", "padding" }) do
