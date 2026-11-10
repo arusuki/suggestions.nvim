@@ -68,14 +68,31 @@ Shell completion supports `!cmd`, `2,4!cmd`, `read !cmd`, and `write !cmd`. Cand
 
 ### Multiple history suggestions
 
-Matching history appears as appendable suffixes at the end of your input:
+The default is a single fish-style ghost suffix without braces. Two independent options control the display and the number of navigable predictions:
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `history.max_visible` | `0` | `0` shows one ghost suffix; a positive integer enables the brace list and limits visible entries. |
+| `history.max_results` | `10` | Maximum prediction history entries after deduplication and filtering; must be a positive integer, independent of the visible count. |
+
+For example, keep up to 10 predictions and show 3 at a time:
+
+```lua
+require("suggestions").setup({
+  history = { max_visible = 3, max_results = 10 },
+})
+```
+
+With multiple-entry display enabled, matching history appears as appendable suffixes at the end of your input:
 
 ```text
 :!git st{ atus --branch | atus --short | ash | ... }
 :!git st{ ... | atus --short | ash | ash pop | ... }
 ```
 
-`SuggestionsHistorySelected` highlights the active entry. History is newest first, deduplicated, and skips exact-input and multiline entries. Ctrl-n / Ctrl-p cycles without changing your input. Leading/trailing `...` means more history exists in that direction; these markers cannot be selected or inserted. `history.max_visible` defaults to 3 and limits visible entries, not the navigable history or the empty-input `completion.history_limit`. Narrow windows show fewer entries or shorten individual suffixes with `…`; if the braces cannot fit, only the active suffix is shown.
+`SuggestionsHistorySelected` highlights the active entry in the brace list. Identical full history entries keep only their newest occurrence, including duplicates across zsh disk and session history. The `history.max_results` limit applies after deduplication and skipping exact-input and multiline entries. Ctrl-n / Ctrl-p cycles through the retained predictions without changing your input, including when `max_visible = 0` displays a single ghost suffix. Leading/trailing `...` means more retained predictions exist in that direction; these markers cannot be selected or inserted. Neither option changes the empty-input `completion.history_limit` or disk loading via `zsh.history_limit`. Narrow windows show fewer entries or shorten individual suffixes with `…`; if the braces cannot fit, only the active suffix is shown.
+
+History predictions, including empty results, are cached for the current input. Navigation, returning the cursor to the end, and asynchronous completion results reuse that list; a new query triggers a new scan. Shell history additions and reloads invalidate the cache through a revision counter. On interaction, Ex checks the newest history number, capacity, and cached entry positions to detect additions and deletions, inspecting at most `history.max_results` entries without traversing other history.
 
 The automatic completion panel stays open alongside history, initially with no selection. Tab cycles through “unselected → first → … → last → unselected”; Shift-Tab reverses that order. Shift-Tab on the first item or Tab on the last clears the selection and restores the previous history preview without closing the panel. Once a panel candidate is selected, Ctrl-n / Ctrl-p then navigates that panel, and its selected candidate owns the inline preview. Ctrl-n / Ctrl-p also passes through the unselected state at panel boundaries, then resumes history navigation. Without history or a selected panel candidate, Ctrl-n / Ctrl-p retains native behavior. Right / end-of-line Ctrl-e accepts the active history entry; Alt-f accepts one word. Editing the input refreshes the matches. Shell-enabled input prompts share this behavior. With `completion.auto = false`, Tab is still required to request the panel.
 
@@ -112,7 +129,10 @@ require("suggestions").setup({
     empty = "none",   -- Empty input: "none" or history-only candidates ("history").
     history_limit = 10, -- Maximum history candidates for empty input.
   },
-  history = { max_visible = 3 }, -- Visible inline history entries.
+  history = {
+    max_visible = 0, -- 0: fish-style ghost; positive: visible entries in braces.
+    max_results = 10, -- Prediction history cap after deduplication/filtering.
+  },
   input = {
     enabled = false, -- Enable suggestions for input() prompts.
     completion = "native",

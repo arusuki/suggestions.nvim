@@ -3,7 +3,7 @@ M.defaults = {
   enabled = true,
   ui = { max_height = 10, max_ratio = 0.35, min_height = 3, padding = 2, separator = "─" },
   completion = { debounce_ms = 70, max_results = 80, auto = true, empty = "none", history_limit = 10 },
-  history = { max_visible = 3 },
+  history = { max_visible = 0, max_results = 10 },
   input = { enabled = false, completion = "native", rules = {} },
   highlights = { shell = {}, match = {}, selected_match = {} },
   fuzzy = {
@@ -78,10 +78,17 @@ function M.resolve(opts)
   assert(
     type(result.history) == "table"
       and type(result.history.max_visible) == "number"
-      and result.history.max_visible >= 1
+      and result.history.max_visible >= 0
       and result.history.max_visible < math.huge
       and result.history.max_visible % 1 == 0,
-    "suggestions: history.max_visible must be a positive integer"
+    "suggestions: history.max_visible must be a nonnegative integer"
+  )
+  assert(
+    type(result.history.max_results) == "number"
+      and result.history.max_results >= 1
+      and result.history.max_results < math.huge
+      and result.history.max_results % 1 == 0,
+    "suggestions: history.max_results must be a positive integer"
   )
   assert(type(result.input) == "table", "suggestions: input must be a table")
   local function validate_input(options, rule)

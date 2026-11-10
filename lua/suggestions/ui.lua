@@ -278,7 +278,7 @@ function M.render(model, config)
   local remaining = math.max(0, available - width(visible))
   local ghost = model.ghost and take(clean(model.ghost), remaining) or ""
   local history_start, history_end
-  if model.selected == 0 and model.ghost and #model.history_items > 0 then
+  if model.selected == 0 and model.ghost and #model.history_items > 0 and model.history_max_visible > 0 then
     ghost, history_start, history_end = history_preview(model, remaining)
   end
   local prompt_row = #lines

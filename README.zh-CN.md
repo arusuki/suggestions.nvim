@@ -68,14 +68,31 @@ require("suggestions").setup()
 
 ### 多条历史预测
 
-历史命中时，输入末尾显示可追加的后缀，例如：
+默认使用单条 fish 式灰字，不显示 `{ }`。两个选项分别控制展示和可导航的预测总数：
+
+| 选项 | 默认值 | 行为 |
+| --- | --- | --- |
+| `history.max_visible` | `0` | `0` 显示单条灰字；正整数启用括号列表，并限制同时显示的条数。 |
+| `history.max_results` | `10` | 去重、过滤后最多保留的预测历史条数，必须为正整数；与同时显示条数独立。 |
+
+例如，最多保留 10 条、同时显示 3 条：
+
+```lua
+require("suggestions").setup({
+  history = { max_visible = 3, max_results = 10 },
+})
+```
+
+启用多条展示后，输入末尾显示可追加的后缀，例如：
 
 ```text
 :!git st{ atus --branch | atus --short | ash | ... }
 :!git st{ ... | atus --short | ash | ash pop | ... }
 ```
 
-当前项使用 `SuggestionsHistorySelected` 高亮。历史按最近使用顺序去重，跳过相同输入和多行记录；Ctrl-n / Ctrl-p 循环切换，不修改输入。前后的 `...` 表示该方向还有未显示的历史，不可选中，也不会写入命令。`history.max_visible` 控制同时显示的条数，默认 3；它不限制可导航的历史总数，也不影响空输入的 `completion.history_limit`。窄窗口会减少显示条数或用 `…` 截短单条内容；空间不足以显示括号时，仅显示当前后缀。
+括号列表中的当前项使用 `SuggestionsHistorySelected` 高亮。完整内容相同的历史只保留最近一条，包括 zsh 磁盘历史与当前会话之间的重复项；跳过与当前输入相同和多行的记录后，再应用 `history.max_results` 上限。Ctrl-n / Ctrl-p 在保留的预测中循环切换，不修改输入；`max_visible = 0` 时也可以切换单条灰字。前后的 `...` 表示当前预测列表中该方向还有未显示的选项，不可选中，也不会写入命令。两个选项不影响空输入的 `completion.history_limit` 或 zsh 磁盘历史加载量 `zsh.history_limit`。窄窗口会减少显示条数或用 `…` 截短单条内容；空间不足以显示括号时，仅显示当前后缀。
+
+历史预测按当前输入缓存，包括没有匹配的结果；导航、光标移回行末和异步补全返回会复用已有列表。新的查询才重新扫描。Shell 历史新增或重新加载时通过版本号使缓存失效；Ex 在交互时检查历史最新编号、容量及已缓存记录的位置，以识别新增和删除，检查量最多为 `history.max_results` 条，无需遍历其他历史。
 
 自动补全面板同时展开，初始没有选中项。Tab 按「未选中 → 第一项 → … → 最后一项 → 未选中」循环，Shift-Tab 反向循环。从第一项按 Shift-Tab 或从最后一项按 Tab 会取消面板选择，恢复之前的历史预览，面板保持展开。进入面板选择后，Ctrl-n / Ctrl-p 也导航面板，行内预览以面板选中项为准；Ctrl-n / Ctrl-p 在面板首尾同样经过未选中状态，回到未选中后重新导航历史。没有历史且未选中面板项时，Ctrl-n / Ctrl-p 保留原生行为。Right / 行末 Ctrl-e 采纳当前历史，Alt-f 按词采纳；输入编辑后重新匹配。此行为也适用于启用了 shell 补全的 input 提示。`completion.auto = false` 仍需 Tab 请求补全面板。
 
@@ -112,7 +129,10 @@ require("suggestions").setup({
     empty = "none",   -- 空输入不提示；设为 "history" 时只显示历史
     history_limit = 10, -- 空输入最多展示的历史条数
   },
-  history = { max_visible = 3 }, -- 同时显示的行内历史条数
+  history = {
+    max_visible = 0, -- 0：单条 fish 灰字；正数：括号列表同时显示的条数
+    max_results = 10, -- 去重、过滤后最多保留的预测历史条数
+  },
   input = {
     enabled = false, -- 是否为 input() 提供 suggestions 补全
     completion = "native",

@@ -276,7 +276,7 @@ class Integration(unittest.TestCase):
           for c = 1, vim.o.columns do result = result .. vim.fn.screenstring(vim.o.lines, c) end
           return result
         """)
-        self.assertIn("!git st{ atus --branch | atus --short }", text)
+        self.assertIn("!git status --branch", text)
         info = self.nvim.funcs.getwininfo(self.inspect()["ui"]["win"])[0]
         self.assertEqual(info["topline"], 1)
         events = [
@@ -337,6 +337,8 @@ class Integration(unittest.TestCase):
         ]
 
     def test_inline_history_window_navigation_and_panel_handoff(self):
+        self.configure_fuzzy(history={"max_visible": 3})
+        self.addCleanup(self.configure_fuzzy)
         for index in range(5, 0, -1):
             self.nvim.funcs.histadd(":", f"set number {index}")
         self.enter(":set nu", "number")
@@ -373,7 +375,7 @@ class Integration(unittest.TestCase):
         self.assertNotIn("{", self.history_prompt())
 
     def test_inline_history_panel_returns_to_unselected(self):
-        self.configure_fuzzy()
+        self.configure_fuzzy(history={"max_visible": 3})
         self.addCleanup(self.configure_fuzzy)
         self.nvim.exec_lua("""
           local backend = require('suggestions.backend')
@@ -412,7 +414,9 @@ class Integration(unittest.TestCase):
         self.assert_completion_closed()
 
     def test_inline_history_single_candidate_returns_to_history(self):
-        self.configure_fuzzy(completion={"auto": False, "max_results": 1})
+        self.configure_fuzzy(
+            completion={"auto": False, "max_results": 1}, history={"max_visible": 3}
+        )
         self.addCleanup(self.configure_fuzzy)
         self.nvim.funcs.histadd(":", "set number norelativenumber")
         self.enter(":set nu")
@@ -492,7 +496,9 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.line(), "!sg-slow second")
 
     def test_inline_history_shell_input_and_search_panel(self):
-        self.configure_input({"enabled": True, "completion": "shell"})
+        self.configure_input(
+            {"enabled": True, "completion": "shell"}, history={"max_visible": 3}
+        )
         self.addCleanup(self.configure_fuzzy)
         self.backend("git st")
         self.enter_input(default="git st")
@@ -516,6 +522,8 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.current()["selected"], 1)
 
     def test_inline_history_unicode_resize_and_selected_highlight(self):
+        self.configure_fuzzy(history={"max_visible": 3})
+        self.addCleanup(self.configure_fuzzy)
         for value in ("戊", "丁", "丙", "乙", "甲"):
             self.nvim.funcs.histadd(":", "echo " + value * 20)
         self.enter(":echo ")
@@ -562,14 +570,98 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.line(), "set number relativenumber")
 
     def test_inline_history_invalid_configuration(self):
-        for value in (0, -1, 1.5, "3", False):
-            with self.subTest(value=value):
-                ok, error = self.nvim.exec_lua(
-                    "return {pcall(require('suggestions.config').resolve, {history = {max_visible = ...}})}",
-                    value,
+        for key, values in (
+            ("max_visible", (-1, 1.5, "3", False)),
+            ("max_results", (0, -1, 1.5, "10", False)),
+        ):
+            for value in values:
+                with self.subTest(key=key, value=value):
+                    ok, error = self.nvim.exec_lua(
+                        "return {pcall(require('suggestions.config').resolve, {history = ...})}",
+                        {key: value},
+                    )
+                    self.assertFalse(ok)
+                    self.assertIn("history." + key, error)
+
+    def test_inline_history_defaults_and_zero_use_fish_preview(self):
+        defaults = self.nvim.exec_lua(
+            "return require('suggestions.config').defaults.history"
+        )
+        self.assertEqual(defaults, {"max_visible": 0, "max_results": 10})
+        self.addCleanup(self.configure_fuzzy)
+        for options in ({}, {"max_visible": 0}):
+            with self.subTest(options=options):
+                self.configure_fuzzy(history=options)
+                self.nvim.funcs.histadd(":", "set number relativenumber")
+                self.nvim.funcs.histadd(":", "set number norelativenumber")
+                self.enter(":set nu", "number")
+                self.assertIn("set number norelativenumber", self.history_prompt())
+                self.assertNotIn("{", self.history_prompt())
+                self.key("<C-n>")
+                self.assertIn("set number relativenumber", self.history_prompt())
+                self.assertNotIn("{", self.history_prompt())
+                self.key("<Tab><S-Tab>")
+                self.assertEqual(self.current()["selected"], 0)
+                self.assertIn("set number relativenumber", self.history_prompt())
+                self.assertNotIn("{", self.history_prompt())
+                self.key("<Right>")
+                self.assertEqual(self.line(), "set number relativenumber")
+                self.key("<Esc>")
+
+    def test_inline_history_ex_limit_counts_unique_predictions(self):
+        self.addCleanup(self.configure_fuzzy)
+        for options, limit in (({}, 10), ({"max_results": 3}, 3)):
+            with self.subTest(options=options):
+                self.configure_fuzzy(
+                    completion={"max_results": 1, "history_limit": 1},
+                    history={"max_visible": 2, **options},
                 )
-                self.assertFalse(ok)
-                self.assertIn("history.max_visible", error)
+                self.nvim.funcs.histdel(":")
+                for index in range(12, -1, -1):
+                    entry = f"set number {index:02}"
+                    self.nvim.funcs.histadd(":", entry)
+                    self.nvim.funcs.histadd(":", entry)
+                self.nvim.funcs.histadd(":", "set nu")
+                self.nvim.funcs.histadd(":", "set number\necho 'skip'")
+                self.enter(":set nu", "number")
+                self.assertEqual(
+                    [item["text"] for item in self.current()["history_items"]],
+                    [f"set number {index:02}" for index in range(limit)],
+                )
+                self.assertIn("{ mber 00 | mber 01 | ... }", self.history_prompt())
+                self.assertEqual(len(self.current()["items"]), 1)
+                self.key("<C-p>")
+                self.assertEqual(self.current()["ghost"], f"mber {limit - 1:02}")
+                self.assertIn(
+                    f"{{ ... | mber {limit - 2:02} | mber {limit - 1:02} }}",
+                    self.history_prompt(),
+                )
+                self.key("<C-n>")
+                self.assertEqual(self.current()["ghost"], "mber 00")
+                self.key("<Esc>")
+
+    def test_inline_history_shell_merges_disk_and_session_before_limit(self):
+        self.configure_fuzzy(history={"max_visible": 5, "max_results": 3})
+        self.addCleanup(self.configure_fuzzy)
+        self.backend("git st")
+        self.nvim.exec_lua(r"""
+          local backend = require('suggestions.backend')
+          for _, entry in ipairs({ 'git stash', 'git status --branch',
+              'git status --branch', 'git st', 'git status multi\nline' }) do
+            backend.remember(entry)
+          end
+        """)
+        self.enter(":!git st", "status")
+        self.assertEqual(
+            [item["text"] for item in self.current()["history_items"]],
+            ["!git status --branch", "!git stash", "!git status --short"],
+        )
+        self.assertIn("{ atus --branch | ash | atus --short }", self.history_prompt())
+        self.assertNotIn("...", self.history_prompt())
+        self.key("<C-n><C-n>")
+        self.assertEqual(self.current()["ghost"], "atus --short")
+        self.key("<C-n>")
+        self.assertEqual(self.current()["ghost"], "atus --branch")
 
     def test_ex_history_tracks_native_execution_and_deletion(self):
         command = "let g:suggestions_session_history = 42"
@@ -582,6 +674,151 @@ class Integration(unittest.TestCase):
         self.nvim.funcs.histdel(":")
         self.enter(":let g:suggestions_session_history = ")
         self.assertFalse(self.current().get("ghost"))
+
+    def track_history_scans(self):
+        self.nvim.exec_lua("""
+          local completion, backend = require('suggestions.completion'), require('suggestions.backend')
+          _G.sg_history_original = { completion.ex_histories, backend.history, vim.fn.histget }
+          _G.sg_history_scans = { ex = 0, shell = 0, reads = 0 }
+          completion.ex_histories = function(...)
+            _G.sg_history_scans.ex = _G.sg_history_scans.ex + 1
+            return _G.sg_history_original[1](...)
+          end
+          backend.history = function(...)
+            _G.sg_history_scans.shell = _G.sg_history_scans.shell + 1
+            return _G.sg_history_original[2](...)
+          end
+          vim.fn.histget = function(...)
+            _G.sg_history_scans.reads = _G.sg_history_scans.reads + 1
+            return _G.sg_history_original[3](...)
+          end
+        """)
+        self.addCleanup(
+            self.nvim.exec_lua,
+            """
+              require('suggestions.completion').ex_histories = _G.sg_history_original[1]
+              require('suggestions.backend').history = _G.sg_history_original[2]
+              vim.fn.histget = _G.sg_history_original[3]
+              _G.sg_history_original, _G.sg_history_scans = nil, nil
+            """,
+        )
+
+    def history_scans(self):
+        return self.nvim.exec_lua("return _G.sg_history_scans")
+
+    def test_history_cache_reuses_ex_matches_and_empty_results(self):
+        self.configure_fuzzy(completion={"debounce_ms": 100, "max_results": 1})
+        self.addCleanup(self.configure_fuzzy)
+        old_capacity = self.nvim.options["history"]
+        self.addCleanup(self.nvim.options.__setitem__, "history", old_capacity)
+        self.nvim.exec_lua("""
+          vim.o.history = 2000
+          vim.fn.histadd(':', 'set number old')
+          vim.fn.histadd(':', 'set number recent')
+          for i = 1, 1200 do vim.fn.histadd(':', 'echo ' .. i) end
+        """)
+        self.track_history_scans()
+        self.enter(":set nu", "number")
+        before = self.history_scans()
+        self.assertEqual(before["ex"], 1)  # Async completion reuses the first scan.
+        self.assertGreaterEqual(before["reads"], 1202)
+        for key in ("<C-n>", "<C-p>", "<Tab>", "<S-Tab>", "<Left>", "<C-e>"):
+            self.key(key)
+        after = self.history_scans()
+        self.assertEqual(after["ex"], 1)
+        self.assertLess(after["reads"] - before["reads"], 100)
+        self.assertEqual(self.current()["ghost"], "mber recent")
+        self.key("<C-u>set rnu")
+        self.wait_for(lambda: self.current().get("items"))
+        self.assertFalse(self.current()["history_items"])
+        self.assertEqual(self.history_scans()["ex"], 2)
+        self.key("<Tab><S-Tab>")
+        self.assertEqual(self.history_scans()["ex"], 2)
+
+    def test_history_cache_ex_changes_invalidate_before_accepting(self):
+        self.configure_fuzzy(completion={"auto": False})
+        self.addCleanup(self.configure_fuzzy)
+        for entry in ("set number old", "set number recent", "echo 'newest'"):
+            self.nvim.funcs.histadd(":", entry)
+        self.track_history_scans()
+        self.enter(":set nu")
+        self.key("<C-n>")
+        self.assertEqual(self.current()["ghost"], "mber old")
+        newest = self.nvim.funcs.histnr(":")
+        self.nvim.funcs.histdel(":", "^set number old$")
+        self.assertEqual(self.nvim.funcs.histnr(":"), newest)
+        self.key("<Right>")
+        self.assertEqual(self.line(), "set number recent")
+        self.assertFalse(self.current()["history_items"])
+        self.key("<C-u>set nu")
+        scans = self.history_scans()["ex"]
+        self.nvim.funcs.histadd(":", "set number added")
+        self.key("<C-n>")
+        self.assertEqual(self.history_scans()["ex"], scans + 1)
+        self.assertEqual(
+            [item["text"] for item in self.current()["history_items"]],
+            ["set number added", "set number recent"],
+        )
+        self.nvim.funcs.histdel(":")
+        self.key("<Tab>")
+        self.key("<S-Tab>")
+        self.assertFalse(self.current()["history_items"])
+        self.assertEqual(self.current()["ghost"], "mber")
+
+    def test_history_cache_ex_capacity_and_negative_cache_invalidation(self):
+        self.configure_fuzzy(completion={"auto": False})
+        self.addCleanup(self.configure_fuzzy)
+        old_capacity = self.nvim.options["history"]
+        self.addCleanup(self.nvim.options.__setitem__, "history", old_capacity)
+        self.track_history_scans()
+        self.enter(":set nu")
+        self.assertFalse(self.current()["history_items"])
+        self.nvim.funcs.histadd(":", "set number newly-added")
+        self.key("<C-p>")
+        self.assertEqual(self.current()["ghost"], "mber newly-added")
+        self.assertEqual(self.history_scans()["ex"], 2)
+        self.nvim.options["history"] = 0
+        self.key("<Tab>")
+        self.key("<S-Tab>")
+        self.assertFalse(self.current()["history_items"])
+        self.assertEqual(self.history_scans()["ex"], 3)
+        self.assertEqual(self.current()["ghost"], "mber")
+
+    def test_history_cache_shell_startup_navigation_and_new_history(self):
+        self.configure_fuzzy(completion={"debounce_ms": 100})
+        self.addCleanup(self.configure_fuzzy)
+        self.track_history_scans()
+        self.enter(":!git st", "status")
+        self.assertEqual(self.current()["ghost"], "atus --branch")
+        self.assertEqual(self.history_scans()["shell"], 2)  # Empty, then disk history.
+        for key in ("<C-n>", "<C-p>", "<Tab>", "<S-Tab>", "<Left>", "<C-e>"):
+            self.key(key)
+        self.assertEqual(self.history_scans()["shell"], 2)
+        self.nvim.exec_lua("require('suggestions.backend').remember('git stash')")
+        self.key("<C-p>")
+        self.assertEqual(self.current()["ghost"], "ash")
+        self.assertEqual(self.history_scans()["shell"], 3)
+        self.key("<C-n><C-p>")
+        self.assertEqual(self.history_scans()["shell"], 3)
+
+    def test_history_cache_shell_reload_discards_old_predictions(self):
+        self.configure_fuzzy()
+        self.addCleanup(self.configure_fuzzy)
+        self.track_history_scans()
+        self.enter(":!git st", "status")
+        history_file = self.folder / "history"
+        old_history = history_file.read_text()
+        self.addCleanup(history_file.write_text, old_history)
+        history_file.write_text(": 1700000003:0;git stash reloaded\n")
+        self.nvim.exec_lua("require('suggestions').reload()")
+        self.wait_for(lambda: self.current().get("ghost") == "ash reloaded")
+        self.assertEqual(
+            [item["text"] for item in self.current()["history_items"]],
+            ["!git stash reloaded"],
+        )
+        scans = self.history_scans()["shell"]
+        self.key("<C-n><C-p><Tab><S-Tab>")
+        self.assertEqual(self.history_scans()["shell"], scans)
 
     def test_ex_completion_fallback_and_selected_preview(self):
         self.nvim.funcs.histadd(":", "set nu")  # An exact entry must not hide fallback.
@@ -1195,7 +1432,7 @@ class Integration(unittest.TestCase):
             history or {},
         )
 
-    def configure_input(self, options=None, auto=True, completion=None):
+    def configure_input(self, options=None, auto=True, completion=None, history=None):
         self.nvim.exec_lua(
             """
             require('suggestions').setup({
@@ -1203,6 +1440,7 @@ class Integration(unittest.TestCase):
               completion = vim.tbl_extend('force',
                 { debounce_ms = 20, auto = select(2, ...) }, select(5, ...)),
               zsh = { env = { ZDOTDIR = select(3, ...) }, history_file = select(4, ...) },
+              history = select(6, ...),
             })
             """,
             options or {},
@@ -1210,6 +1448,7 @@ class Integration(unittest.TestCase):
             str(self.folder),
             str(self.folder / "history"),
             completion or {},
+            history or {},
         )
 
     def enter_input(self, prompt="Compile command: ", default="", completion=None):

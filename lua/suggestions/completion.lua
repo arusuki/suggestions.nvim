@@ -16,13 +16,14 @@ function M.shell_prefix(line)
   end
 end
 
-function M.ex_histories(prefix)
+function M.ex_histories(prefix, limit)
   local entries, seen = {}, {}
+  local snapshot = { newest = vim.fn.histnr(":"), capacity = vim.o.history, positions = {} }
   if prefix == "" then
-    return entries
+    return entries, snapshot
   end
-  -- Read native history directly: this includes ShaDa and the current session,
-  -- and respects histdel() and 'history' without a second cache.
+  -- Keep positions only for retained matches. Deleting a newer entry shifts
+  -- these positions; deleting older entries cannot change the top matches.
   for index = 1, vim.o.history do
     local entry = vim.fn.histget(":", -index)
     if entry == "" then
@@ -31,13 +32,31 @@ function M.ex_histories(prefix)
     if #entry > #prefix and entry:sub(1, #prefix) == prefix and not entry:find("[\r\n]") and not seen[entry] then
       seen[entry] = true
       entries[#entries + 1] = entry
+      snapshot.positions[#entries] = { index = -index, text = entry }
+      if #entries >= (limit or math.huge) then
+        break
+      end
     end
   end
-  return entries
+  return entries, snapshot
+end
+
+function M.ex_history_valid(snapshot)
+  if snapshot.newest ~= vim.fn.histnr(":") or snapshot.capacity ~= vim.o.history then
+    return false
+  end
+  -- histdel() need not change histnr(). Validate at most the result limit,
+  -- without scanning nonmatches or rebuilding the prediction list.
+  for _, entry in ipairs(snapshot.positions) do
+    if vim.fn.histget(":", entry.index) ~= entry.text then
+      return false
+    end
+  end
+  return true
 end
 
 function M.ex_history(prefix)
-  return M.ex_histories(prefix)[1]
+  return M.ex_histories(prefix, 1)[1]
 end
 
 function M.history(kind, limit)

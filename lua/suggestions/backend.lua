@@ -2,7 +2,7 @@ local M = {}
 local uv = vim.uv or vim.loop
 local source = debug.getinfo(1, "S").source:sub(2)
 local script = vim.fn.fnamemodify(source, ":p:h:h:h") .. "/shell/completion.zsh"
-local state = { generation = 0, sequence = 0, history = {}, session_history = {} }
+local state = { generation = 0, sequence = 0, history = {}, session_history = {}, history_version = 0 }
 local dispatch
 
 local function read(path)
@@ -115,6 +115,7 @@ local function start()
           state.last_error = nil
           state.history =
             vim.list_extend(vim.deepcopy(state.session_history), fields(read(state.directory .. "/history")))
+          state.history_version = state.history_version + 1
           dispatch()
         else
           finish(tonumber(marker))
@@ -179,11 +180,13 @@ function M.setup(config)
   M.stop()
   state.config = config
   state.history, state.session_history = {}, {}
+  state.history_version = state.history_version + 1
 end
 
 function M.reload()
   M.stop("zsh reloaded")
   state.history = vim.deepcopy(state.session_history)
+  state.history_version = state.history_version + 1
   local ok, err = start()
   state.last_error = err
   return ok, err
@@ -219,10 +222,20 @@ function M.request_history(limit, callback)
   enqueue({ history_limit = limit, callback = callback })
 end
 
-function M.history(prefix, limit)
+function M.history_version()
+  return state.history_version
+end
+
+function M.history(prefix, limit, extend_only)
   local result, seen = {}, {}
   for _, entry in ipairs(state.history) do
-    if entry:sub(1, #prefix) == prefix and entry:find("%S") and not seen[entry] and not entry:find("[\r\n]") then
+    if
+      entry:sub(1, #prefix) == prefix
+      and (not extend_only or #entry > #prefix)
+      and entry:find("%S")
+      and not seen[entry]
+      and not entry:find("[\r\n]")
+    then
       seen[entry] = true
       result[#result + 1] = entry
       if #result >= (limit or 100) then
@@ -237,6 +250,7 @@ function M.remember(command)
   if command:match("%S") and command:sub(1, 1) ~= " " then
     table.insert(state.history, 1, command)
     table.insert(state.session_history, 1, command)
+    state.history_version = state.history_version + 1
   end
 end
 

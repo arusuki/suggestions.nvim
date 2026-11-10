@@ -32,7 +32,43 @@ local function empty(model)
   return not model.text:sub(#(model.shell or "") + 1):find("%S")
 end
 
-local function suggest(model)
+local function history_items(model)
+  local source = model.shell and "shell" or not model.input and "ex" or nil
+  if not source then
+    return {}
+  end
+  local cache, limit = model.history_cache, state.config.history.max_results
+  local prefix = model.shell or ""
+  if
+    cache
+    and cache.source == source
+    and cache.text == model.text
+    and cache.prefix == prefix
+    and cache.limit == limit
+  then
+    local valid = source == "shell" and cache.version == backend.history_version()
+      or source == "ex" and completion.ex_history_valid(cache.snapshot)
+    if valid then
+      return cache.items
+    end
+  end
+  local text = model.text:sub(#prefix + 1)
+  cache = { source = source, text = model.text, prefix = prefix, limit = limit, items = {} }
+  local entries
+  if source == "shell" then
+    entries = backend.history(text, limit, true)
+    cache.version = backend.history_version()
+  else
+    entries, cache.snapshot = completion.ex_histories(text, limit)
+  end
+  for _, entry in ipairs(entries) do
+    cache.items[#cache.items + 1] = { text = prefix .. entry, cursor = #prefix + #entry }
+  end
+  model.history_cache = cache
+  return cache.items
+end
+
+local function suggest(model, reuse_history)
   model.ghost, model.suggestion = nil, nil
   if
     (model.firstc ~= ":" and not (model.input and model.input.enabled))
@@ -53,25 +89,16 @@ local function suggest(model)
     use(model.items[model.selected])
     return
   end
-  local prefix = model.shell or ""
-  local text = model.text:sub(#prefix + 1)
-  local history = {}
-  if model.shell then
-    history = backend.history(text, math.huge)
-  elseif not model.input then
-    history = completion.ex_histories(text)
-  end
-  local previous = model.history_items[model.history_selected]
-  local explicit = model.history_explicit
-  model.history_explicit = false
-  model.history_items, model.history_selected = {}, 1
-  for _, entry in ipairs(history) do
-    if #entry > #text then
-      local candidate = { text = prefix .. entry, cursor = #prefix + #entry }
-      table.insert(model.history_items, candidate)
+  local items = reuse_history and model.history_items or history_items(model)
+  if model.history_items ~= items then
+    local previous = model.history_items[model.history_selected]
+    local explicit = model.history_explicit
+    model.history_items, model.history_selected, model.history_explicit = items, 1, false
+    for index, candidate in ipairs(items) do
       if previous and previous.text == candidate.text then
-        model.history_selected = #model.history_items
+        model.history_selected = index
         model.history_explicit = explicit
+        break
       end
     end
   end
@@ -189,9 +216,12 @@ local function complete(model, serial)
   end
 end
 
-refresh = function(model)
+refresh = function(model, check_history)
   local identity = model.cmdtype .. "\0" .. model.prompt .. "\0" .. model.text .. "\0" .. model.pos
   if model.identity == identity then
+    if check_history and model.confirmed_text ~= model.text then
+      suggest(model)
+    end
     return
   end
   model.identity = identity
@@ -360,7 +390,7 @@ function M._key(action, fallback)
   end
   -- Mappings may run before the next UI redraw has delivered cmdline_show.
   model.text, model.pos = vim.fn.getcmdline(), vim.fn.getcmdpos() - 1
-  refresh(model)
+  refresh(model, true)
   if cmdtype == "@" and not (model.input and model.input.enabled) then
     return keycodes(fallback)
   end
@@ -375,7 +405,7 @@ function M._key(action, fallback)
     elseif #model.history_items > 0 then
       model.history_selected = (model.history_selected - 1 + direction) % #model.history_items + 1
       model.history_explicit = true
-      suggest(model)
+      suggest(model, true) -- refresh() already validated the history for this key.
       queue_render()
       return ""
     end
@@ -545,6 +575,7 @@ function M.reload()
     state.serial = state.serial + 1
     model.serial = state.serial
     model.identity, model.navigation, model.confirmed_text = nil, nil, nil
+    model.history_cache = nil
     reset_items(model)
   end
   local ok, err = backend.reload()
