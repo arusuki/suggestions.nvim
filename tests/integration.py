@@ -645,6 +645,70 @@ class Integration(unittest.TestCase):
         self.key("<CR>")
         self.assertTrue(self.nvim.current.window.options["number"])
 
+    def test_keys_multiple_bindings_cycle_and_confirm(self):
+        self.addCleanup(self.configure_fuzzy)
+        self.configure_fuzzy(
+            completion={"auto": False},
+            keys={
+                "next": ["<Tab>", "<C-n>"],
+                "previous": ["<S-Tab>", "<C-p>"],
+                "confirm": ["<CR>", "<C-y>"],
+            },
+        )
+        self.enter(":!sg-test --")
+        self.assertFalse(self.current()["items"])
+        self.key("<C-n>")
+        self.wait_for(lambda: self.current()["selected"] == 1, "manual selection")
+        self.assertEqual(len(self.current()["items"]), 3)
+        for key, selected in (
+            ("<Tab>", 2),
+            ("<C-n>", 3),
+            ("<Tab>", 1),
+            ("<C-p>", 3),
+            ("<S-Tab>", 2),
+            ("<C-p>", 1),
+        ):
+            with self.subTest(key=key, selected=selected):
+                self.key(key)
+                self.assertEqual(self.current()["selected"], selected)
+                self.assertEqual(self.line(), "!sg-test --")
+        self.key("<C-y>")
+        self.assertEqual(self.line(), "!sg-test --alpha")
+        self.assert_completion_closed()
+
+    def test_keys_multiple_bindings_keep_each_native_fallback(self):
+        self.addCleanup(self.configure_fuzzy)
+        self.configure_fuzzy(
+            completion={"auto": False}, keys={"accept": ["<Right>", "<Left>"]}
+        )
+        self.enter(":echo 'abcd'")
+        end = self.nvim.funcs.getcmdpos()
+        self.key("<Left>")
+        self.assertEqual(self.nvim.funcs.getcmdpos(), end - 1)
+        self.key("<Right>")
+        self.assertEqual(self.nvim.funcs.getcmdpos(), end)
+        self.key("<Esc>")
+        self.enter_input(default="abcd")
+        self.assertFalse(self.current()["input"]["enabled"])
+        self.key("<Left>")
+        self.assertEqual(self.nvim.funcs.getcmdpos(), 4)
+        self.key("<Right>")
+        self.assertEqual(self.nvim.funcs.getcmdpos(), 5)
+
+    def test_keys_disabled_and_invalid_configuration(self):
+        self.addCleanup(self.configure_fuzzy)
+        self.configure_fuzzy(keys={"next": False, "previous": [], "accept_word": ""})
+        for key in ("<Tab>", "<S-Tab>", "<M-f>"):
+            self.assertFalse(self.nvim.funcs.maparg(key, "c", False, True))
+        for keys in (True, 42, {"lhs": "<C-n>"}, ["<Tab>", False], [""]):
+            with self.subTest(keys=keys):
+                ok, error = self.nvim.exec_lua(
+                    "return {pcall(require('suggestions.config').resolve, {keys = {next = ...}})}",
+                    keys,
+                )
+                self.assertFalse(ok)
+                self.assertIn("keys.next", error)
+
     def test_confirm_waits_for_edit_or_explicit_completion(self):
         self.nvim.exec_lua("""
           vim.api.nvim_create_user_command('Git', function() end, {
@@ -871,18 +935,20 @@ class Integration(unittest.TestCase):
         self.assertFalse(self.inspect()["backend"]["running"])
         self.assertTrue(self.backend("sg-test --a"))
 
-    def configure_fuzzy(self, options=None, completion=None):
+    def configure_fuzzy(self, options=None, completion=None, keys=None):
         self.nvim.exec_lua(
             """
             require('suggestions').setup({
               fuzzy = select(1, ...), completion = select(2, ...),
               zsh = { env = { ZDOTDIR = select(3, ...) }, history_file = select(4, ...) },
+              keys = select(5, ...),
             })
             """,
             options or {},
             completion or {"debounce_ms": 20},
             str(self.folder),
             str(self.folder / "history"),
+            keys or {},
         )
 
     def configure_input(self, options=None, auto=True, completion=None):
@@ -1543,21 +1609,48 @@ class Integration(unittest.TestCase):
         self.nvim.exec_lua("""
           require('suggestions').disable()
           vim.keymap.set('c', '<Tab>', '<C-z>', { desc = 'original mapping' })
-          require('suggestions').enable()
+          vim.keymap.set('c', '<C-n>', '<C-z>', { desc = 'original C-n mapping' })
         """)
-        self.enter(":set nu", "number")
-        self.nvim.exec_lua("require('suggestions').disable()")
-        self.assertFalse(self.inspect()["enabled"])
-        self.assertFalse(self.inspect()["backend"]["running"])
-        self.assertEqual(self.nvim.options["cmdheight"], 0)
-        self.assertEqual(
-            self.nvim.funcs.maparg("<Tab>", "c", False, True)["desc"],
-            "original mapping",
+        self.configure_fuzzy(
+            keys={
+                "next": ["<Tab>", "<C-n>", "<C-n>"],
+                "previous": ["<S-Tab>", "<C-p>"],
+            }
         )
-        self.key("<C-c>")
-        self.nvim.exec_lua(
-            "vim.keymap.del('c', '<Tab>'); require('suggestions').enable()"
-        )
+        try:
+            self.enter(":set nu", "number")
+            self.nvim.exec_lua("require('suggestions').disable()")
+            self.assertFalse(self.inspect()["enabled"])
+            self.assertFalse(self.inspect()["backend"]["running"])
+            self.assertEqual(self.nvim.options["cmdheight"], 0)
+            for key, desc in (
+                ("<Tab>", "original mapping"),
+                ("<C-n>", "original C-n mapping"),
+            ):
+                self.assertEqual(
+                    self.nvim.funcs.maparg(key, "c", False, True)["desc"], desc
+                )
+            self.assertFalse(self.nvim.funcs.maparg("<C-p>", "c", False, True))
+            self.key("<C-c>")
+            self.nvim.exec_lua("require('suggestions').enable()")
+            self.assertEqual(
+                self.nvim.funcs.maparg("<C-n>", "c", False, True)["desc"],
+                "suggestions.nvim: next",
+            )
+            self.configure_fuzzy()
+            self.assertEqual(
+                self.nvim.funcs.maparg("<C-n>", "c", False, True)["desc"],
+                "original C-n mapping",
+            )
+            self.assertFalse(self.nvim.funcs.maparg("<C-p>", "c", False, True))
+        finally:
+            self.key("<C-c>")
+            self.nvim.exec_lua("""
+              require('suggestions').disable()
+              vim.keymap.del('c', '<Tab>')
+              vim.keymap.del('c', '<C-n>')
+            """)
+            self.configure_fuzzy()
 
     def test_z_manual_completion_and_missing_shell(self):
         self.nvim.exec_lua("""

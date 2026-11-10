@@ -127,6 +127,18 @@ require("suggestions").setup({
 })
 ```
 
+`keys` 中每个动作支持单个快捷键字符串、快捷键列表，或用 `false` 禁用。
+列表会替换默认绑定；要保留默认快捷键，请将它一起写入列表：
+
+```lua
+require("suggestions").setup({
+  keys = {
+    next = { "<Tab>", "<C-n>" },
+    previous = { "<S-Tab>", "<C-p>" },
+  },
+})
+```
+
 空输入（包括只有空白字符、`:!` 后尚未输入命令，以及启用补全的 input 提示）默认不显示候选或灰字，按 Tab 也不会请求普通补全。已经输入命令后的参数补全（如 `:edit `、`:!ls `）不受影响。
 
 设置 `completion.empty = "history"` 后，空输入只显示最近的历史记录：Ex 使用 `:` 历史，`/` 和 `?` 使用搜索历史，shell 使用 zsh 和当前会话历史，其他已启用补全的 input 使用 Neovim 共享的 input 历史。候选按最近使用顺序去重，跳过空白和多行记录，最多显示 `completion.history_limit` 条（正整数，默认 10），同时受 `completion.max_results` 限制。没有历史时不显示候选，也不会回退为普通补全。空输入仍不显示灰字或自动选中历史；Tab 选择，Enter 确认后再次 Enter 才执行。`completion.auto = false` 时需按 Tab 请求历史候选；关闭搜索或 input 补全时也不显示其历史候选。`zsh.history_limit` 仍单独控制从磁盘加载的历史条数。

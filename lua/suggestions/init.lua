@@ -321,8 +321,11 @@ local function history(model, direction)
   return true
 end
 
-function M._key(action)
-  local fallback = state.config.keys[action]
+function M._key(action, fallback)
+  fallback = fallback or state.config.keys[action]
+  if type(fallback) == "table" then
+    fallback = fallback[1]
+  end
   -- A mapped <Esc> executes an Ex command (Vim compatibility); <C-c> is
   -- the unambiguous cancel operation, including in nested/search prompts.
   if action == "close" then
@@ -397,7 +400,8 @@ function M.disable()
   state.levels, state.block = {}, {}
   pcall(vim.ui_detach, ns)
   pcall(api.nvim_del_augroup_by_name, "Suggestions")
-  for _, map in ipairs(state.mappings) do
+  for index = #state.mappings, 1, -1 do
+    local map = state.mappings[index]
     local current = vim.fn.maparg(map.lhs, "c", false, true)
     if current.desc == map.desc then
       vim.keymap.del("c", map.lhs)
@@ -427,13 +431,16 @@ function M.enable()
     state.enabled = false
     error(err)
   end
-  for action, lhs in pairs(state.config.keys) do
-    if lhs and lhs ~= "" then
-      local desc = "suggestions.nvim: " .. action
-      state.mappings[#state.mappings + 1] = { lhs = lhs, desc = desc, previous = vim.fn.maparg(lhs, "c", false, true) }
-      vim.keymap.set("c", lhs, function()
-        return M._key(action)
-      end, { expr = true, silent = true, desc = desc, replace_keycodes = false })
+  for action, keys in pairs(state.config.keys) do
+    for _, lhs in ipairs(type(keys) == "table" and keys or { keys }) do
+      if lhs and lhs ~= "" then
+        local desc = "suggestions.nvim: " .. action
+        state.mappings[#state.mappings + 1] =
+          { lhs = lhs, desc = desc, previous = vim.fn.maparg(lhs, "c", false, true) }
+        vim.keymap.set("c", lhs, function()
+          return M._key(action, lhs)
+        end, { expr = true, silent = true, desc = desc, replace_keycodes = false })
+      end
     end
   end
   local group = api.nvim_create_augroup("Suggestions", { clear = true })

@@ -53,8 +53,16 @@ CONFIGURATION                                           *suggestions-config*
       keys = { accept = '<Right>', accept_word = '<M-f>' },
     })
 <
-Set any key entry to false to disable that mapping. Full defaults are in
-lua/suggestions/config.lua. Startup files supply compdef, fpath and aliases.
+Each keys action accepts a string, a list of strings, or false to disable it.
+Lists replace the default binding; include it explicitly to keep it:
+>lua
+    keys = {
+      next = { '<Tab>', '<C-n>' },
+      previous = { '<S-Tab>', '<C-p>' },
+    }
+<
+Full defaults are in lua/suggestions/config.lua.
+Startup files supply compdef, fpath and aliases.
 Zsh history is loaded at worker startup; session commands stay in memory. The
 plugin never writes the user's HISTFILE. Completion text is read as data;
 normal user-defined completion functions may still execute helper commands.

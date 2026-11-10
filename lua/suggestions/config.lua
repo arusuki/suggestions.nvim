@@ -39,6 +39,18 @@ M.defaults = {
 
 function M.resolve(opts)
   local result = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), opts or {})
+  assert(type(result.keys) == "table", "suggestions: keys must be a table")
+  for action, keys in pairs(result.keys) do
+    assert(
+      keys == false or type(keys) == "string" or (type(keys) == "table" and vim.islist(keys)),
+      "suggestions: keys." .. action .. " must be a string, a list of strings, or false"
+    )
+    if type(keys) == "table" then
+      for _, lhs in ipairs(keys) do
+        assert(type(lhs) == "string" and lhs ~= "", "suggestions: keys." .. action .. " must contain nonempty strings")
+      end
+    end
+  end
   assert(type(result.input) == "table", "suggestions: input must be a table")
   local function validate_input(options, rule)
     assert(

@@ -127,6 +127,18 @@ require("suggestions").setup({
 })
 ```
 
+Each `keys` action accepts a single key, a list of keys, or `false` to disable it.
+Lists replace the default binding; include it explicitly to keep it:
+
+```lua
+require("suggestions").setup({
+  keys = {
+    next = { "<Tab>", "<C-n>" },
+    previous = { "<S-Tab>", "<C-p>" },
+  },
+})
+```
+
 Empty or whitespace-only input shows no candidates or ghost text by default, including a bare `:!` and enabled input prompts. Tab also leaves it empty. Argument completion after a command, such as `:edit ` or `:!ls `, is unaffected.
 
 Set `completion.empty = "history"` to show only recent history for empty input. Ex uses `:` history, `/` and `?` use search history, shell prompts use zsh and session history, and other enabled input prompts use Neovim's shared input history. Entries are newest first, deduplicated, and exclude blank or multiline entries. `completion.history_limit` is a positive integer (default 10), also capped by `completion.max_results`. Missing history leaves the list empty without falling back to ordinary completion. Empty input still has no ghost text or automatic selection: Tab selects, Enter confirms, and another Enter executes. With `completion.auto = false`, press Tab to request history candidates. Disabled search/input completion also disables its history candidates. `zsh.history_limit` separately controls how much history is loaded from disk.
