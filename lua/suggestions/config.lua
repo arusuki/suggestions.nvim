@@ -3,6 +3,7 @@ M.defaults = {
   enabled = true,
   ui = { max_height = 10, max_ratio = 0.35, min_height = 3, padding = 2, separator = "─" },
   completion = { debounce_ms = 70, max_results = 80, auto = true, empty = "none", history_limit = 10 },
+  history = { max_visible = 3 },
   input = { enabled = false, completion = "native", rules = {} },
   highlights = { shell = {}, match = {}, selected_match = {} },
   fuzzy = {
@@ -24,6 +25,8 @@ M.defaults = {
   keys = {
     next = "<Tab>",
     previous = "<S-Tab>",
+    suggestion_next = "<C-n>",
+    suggestion_previous = "<C-p>",
     accept = "<Right>",
     accept_word = "<M-f>",
     history_previous = "<Up>",
@@ -51,6 +54,35 @@ function M.resolve(opts)
       end
     end
   end
+  -- Explicit bindings take priority over defaults, including the new C-n/C-p
+  -- actions when an existing configuration already uses those keys for Tab.
+  local claimed = {}
+  for _, keys in pairs((opts or {}).keys or {}) do
+    for _, lhs in ipairs(type(keys) == "table" and keys or { keys }) do
+      if lhs and lhs ~= "" then
+        claimed[vim.api.nvim_replace_termcodes(lhs, true, false, true)] = true
+      end
+    end
+  end
+  for action, keys in pairs(result.keys) do
+    if ((opts or {}).keys or {})[action] == nil then
+      local bindings = {}
+      for _, lhs in ipairs(type(keys) == "table" and keys or { keys }) do
+        if lhs and lhs ~= "" and not claimed[vim.api.nvim_replace_termcodes(lhs, true, false, true)] then
+          bindings[#bindings + 1] = lhs
+        end
+      end
+      result.keys[action] = bindings
+    end
+  end
+  assert(
+    type(result.history) == "table"
+      and type(result.history.max_visible) == "number"
+      and result.history.max_visible >= 1
+      and result.history.max_visible < math.huge
+      and result.history.max_visible % 1 == 0,
+    "suggestions: history.max_visible must be a positive integer"
+  )
   assert(type(result.input) == "table", "suggestions: input must be a table")
   local function validate_input(options, rule)
     assert(

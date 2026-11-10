@@ -23,6 +23,7 @@ local function reset_items(model)
     model.cancel = nil
   end
   model.items, model.selected, model.ghost, model.suggestion = {}, 0, nil, nil
+  model.history_items, model.history_selected, model.history_explicit = {}, 0, false
   model.loading, model.error = false, nil
   model.want_select = nil
 end
@@ -54,13 +55,27 @@ local function suggest(model)
   end
   local prefix = model.shell or ""
   local text = model.text:sub(#prefix + 1)
-  local history
+  local history = {}
   if model.shell then
-    history = backend.history(text, 1)[1]
+    history = backend.history(text, math.huge)
   elseif not model.input then
-    history = completion.ex_history(text)
+    history = completion.ex_histories(text)
   end
-  if history and use({ text = prefix .. history, cursor = #prefix + #history }) then
+  local previous = model.history_items[model.history_selected]
+  local explicit = model.history_explicit
+  model.history_explicit = false
+  model.history_items, model.history_selected = {}, 1
+  for _, entry in ipairs(history) do
+    if #entry > #text then
+      local candidate = { text = prefix .. entry, cursor = #prefix + #entry }
+      table.insert(model.history_items, candidate)
+      if previous and previous.text == candidate.text then
+        model.history_selected = #model.history_items
+        model.history_explicit = explicit
+      end
+    end
+  end
+  if use(model.history_items[model.history_selected]) then
     return
   end
   for _, item in ipairs(model.items) do
@@ -82,6 +97,7 @@ local function render()
   end
   refresh(model)
   model.block = state.block
+  model.history_max_visible = state.config.history.max_visible
   ui.render(model, state.config.ui)
   -- Scheduled UI updates do not automatically redraw while native cmdline
   -- input is blocking. Flush the drawer now, including async zsh results.
@@ -182,6 +198,11 @@ refresh = function(model)
   state.serial = state.serial + 1
   model.serial = state.serial
   reset_items(model)
+  local pending = model.pending_history
+  model.pending_history = nil
+  if pending and pending.text == model.text and model.pos == #model.text then
+    model.history_items, model.history_selected = { pending.item }, 1
+  end
   if model.cmdtype == "@" then
     model.input = require("suggestions.config").input(state.config.input, model.prompt)
   else
@@ -294,11 +315,9 @@ local function cycle(model, direction)
     complete(model, model.serial)
     return
   end
-  if model.selected == 0 then
-    model.selected = direction > 0 and 1 or #model.items
-  else
-    model.selected = (model.selected - 1 + direction) % #model.items + 1
-  end
+  -- Include the unselected state so leaving either end of the panel restores
+  -- history suggestions without changing the input or closing the panel.
+  model.selected = (model.selected + direction) % (#model.items + 1)
   suggest(model)
   queue_render()
 end
@@ -348,8 +367,20 @@ function M._key(action, fallback)
   if action == "next" or action == "previous" then
     cycle(model, action == "next" and 1 or -1)
     return ""
+  elseif action == "suggestion_next" or action == "suggestion_previous" then
+    local direction = action == "suggestion_next" and 1 or -1
+    if model.selected > 0 then
+      cycle(model, direction)
+      return ""
+    elseif #model.history_items > 0 then
+      model.history_selected = (model.history_selected - 1 + direction) % #model.history_items + 1
+      model.history_explicit = true
+      suggest(model)
+      queue_render()
+      return ""
+    end
   elseif action == "confirm" then
-    local item = model.items[model.selected]
+    local item = model.items[model.selected] or (model.history_explicit and model.suggestion)
     if item then
       apply(model, item, true)
       return ""
@@ -359,7 +390,12 @@ function M._key(action, fallback)
     if item and (model.selected > 0 or model.pos == #model.text) then
       if action == "accept_word" and model.ghost then
         local word = model.ghost:match("^%s*[^%s/]+/?%s*") or model.ghost
-        apply(model, { text = model.text .. word, cursor = #model.text + #word })
+        local text = model.text .. word
+        local from_history = model.selected == 0 and #model.history_items > 0
+        apply(model, { text = text, cursor = #text })
+        if from_history then
+          model.pending_history = { text = text, item = item }
+        end
       else
         apply(model, item)
       end

@@ -47,15 +47,16 @@ require("suggestions").setup()
 | `→` | Accept an explicit selection or ghost text at the end of the line; otherwise move right |
 | `Alt-f` | Accept one word of ghost text; otherwise move forward one word |
 | `Alt-b` | Move backward one word |
-| `Tab` / `Shift-Tab` | Cycle forward / backward through candidates |
+| `Tab` / `Shift-Tab` | Enter the completion panel and cycle forward / backward |
+| `Ctrl-n` / `Ctrl-p` | Cycle forward / backward through inline history; navigate the panel once a candidate is selected |
 | `↑` / `↓` | Browse prefix-matched zsh history; move through candidates after an explicit selection |
-| `Enter` | Confirm an explicit selection; otherwise execute the current input |
+| `Enter` | Confirm manually navigated history or a selected panel candidate; otherwise execute the current input |
 | `Ctrl-a` / `Ctrl-e` | Move to the beginning / end; at the end, `Ctrl-e` accepts ghost text |
 | `Ctrl-k` | Delete from the cursor to the end |
 | `Ctrl-u` / `Ctrl-w` | Keep Neovim's native backward line / word deletion |
 | `Esc` / `Ctrl-c` | Cancel the command and close the drawer |
 
-Automatically displayed candidates are not preselected. Enter executes only the current input; unaccepted ghost text is never executed.
+Automatically displayed completion candidates are not preselected, and the initial highlighted history entry is only a preview. Enter executes the current input until you explicitly select something. After Ctrl-n / Ctrl-p navigates history, Enter confirms that entry; a second Enter executes it.
 
 After Enter confirms a selection, candidates and ghost text stay hidden until you edit the input (for example, type a space). Moving the cursor alone does not reopen completion. Tab / Shift-Tab can request candidates immediately; another Enter executes the confirmed input.
 
@@ -64,6 +65,19 @@ Ex commands use Neovim's native completion contexts, including files, options, L
 Ghost text appears only at the end of a nonempty command, never in search or nested expression prompts. Ex history uses Neovim's loaded history, including ShaDa and the current session, respects `'history'` and native history deletion, and skips multiline entries. Without an explicit selection, Ex Up/Down retain native history navigation. With `completion.auto = false`, Ex history suggestions still appear; press Tab to request completion.
 
 Shell completion supports `!cmd`, `2,4!cmd`, `read !cmd`, and `write !cmd`. Candidates preserve zsh's quoting, escaped spaces, directory slashes, and text to the right of the cursor. Completion uses the originating window's working directory, including `:lcd`.
+
+### Multiple history suggestions
+
+Matching history appears as appendable suffixes at the end of your input:
+
+```text
+:!git st{ atus --branch | atus --short | ash | ... }
+:!git st{ ... | atus --short | ash | ash pop | ... }
+```
+
+`SuggestionsHistorySelected` highlights the active entry. History is newest first, deduplicated, and skips exact-input and multiline entries. Ctrl-n / Ctrl-p cycles without changing your input. Leading/trailing `...` means more history exists in that direction; these markers cannot be selected or inserted. `history.max_visible` defaults to 3 and limits visible entries, not the navigable history or the empty-input `completion.history_limit`. Narrow windows show fewer entries or shorten individual suffixes with `…`; if the braces cannot fit, only the active suffix is shown.
+
+The automatic completion panel stays open alongside history, initially with no selection. Tab cycles through “unselected → first → … → last → unselected”; Shift-Tab reverses that order. Shift-Tab on the first item or Tab on the last clears the selection and restores the previous history preview without closing the panel. Once a panel candidate is selected, Ctrl-n / Ctrl-p then navigates that panel, and its selected candidate owns the inline preview. Ctrl-n / Ctrl-p also passes through the unselected state at panel boundaries, then resumes history navigation. Without history or a selected panel candidate, Ctrl-n / Ctrl-p retains native behavior. Right / end-of-line Ctrl-e accepts the active history entry; Alt-f accepts one word. Editing the input refreshes the matches. Shell-enabled input prompts share this behavior. With `completion.auto = false`, Tab is still required to request the panel.
 
 ## Configuration
 
@@ -98,6 +112,7 @@ require("suggestions").setup({
     empty = "none",   -- Empty input: "none" or history-only candidates ("history").
     history_limit = 10, -- Maximum history candidates for empty input.
   },
+  history = { max_visible = 3 }, -- Visible inline history entries.
   input = {
     enabled = false, -- Enable suggestions for input() prompts.
     completion = "native",
@@ -133,11 +148,14 @@ Lists replace the default binding; include it explicitly to keep it:
 ```lua
 require("suggestions").setup({
   keys = {
-    next = { "<Tab>", "<C-n>" },
-    previous = { "<S-Tab>", "<C-p>" },
+    accept = { "<Right>", "<C-y>" },
+    suggestion_next = "<C-n>",
+    suggestion_previous = "<C-p>",
   },
 })
 ```
+
+Explicit bindings take priority over other actions' defaults. Assigning Ctrl-n / Ctrl-p to `next` / `previous` makes them always navigate the completion panel.
 
 Empty or whitespace-only input shows no candidates or ghost text by default, including a bare `:!` and enabled input prompts. Tab also leaves it empty. Argument completion after a command, such as `:edit ` or `:!ls `, is unaffected.
 
@@ -189,7 +207,7 @@ vim.opt.shellcmdflag = "-ic"
 
 Each `:!` is still a separate command execution, not a persistent terminal session. `!cd` does not change Neovim's directory. Use `:terminal` for interactive TUI programs.
 
-Override these highlight groups to customize the appearance: `SuggestionsNormal`, `SuggestionsMuted`, `SuggestionsGhost`, `SuggestionsBorder`, `SuggestionsAccent`, and `SuggestionsSelection`. Defaults follow the current theme and refresh on `ColorScheme`.
+Override these highlight groups to customize the appearance: `SuggestionsNormal`, `SuggestionsMuted`, `SuggestionsGhost`, `SuggestionsHistorySelected`, `SuggestionsBorder`, `SuggestionsAccent`, and `SuggestionsSelection`. Defaults follow the current theme and refresh on `ColorScheme`.
 
 Shell input (`:!`, filter commands, and input prompts configured for shell completion) uses a soft pink prompt and top separator. The default blends rose with the theme's foreground and background, using a deeper shade for legibility on light themes, and refreshes after `ColorScheme`. Configure both through `highlights.shell`; colors and other `nvim_set_hl` attributes set here survive theme changes:
 

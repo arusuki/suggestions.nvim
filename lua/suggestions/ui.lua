@@ -28,6 +28,7 @@ function M.highlights(config)
     Normal = { fg = fg, bg = surface },
     Muted = { fg = comment.fg or blend(bg, fg, 0.5), bg = surface },
     Ghost = { fg = comment.fg or blend(bg, fg, 0.48), bg = surface, italic = true },
+    HistorySelected = { fg = accent.fg or fg, bg = blend(bg, accent.fg or fg, 0.12), bold = true },
     Border = { fg = blend(bg, fg, 0.2), bg = surface },
     Accent = { fg = accent.fg or 0x89b4fa, bg = surface, bold = true },
     Selection = { fg = fg, bg = blend(bg, accent.fg or fg, 0.16), bold = true },
@@ -91,6 +92,42 @@ local function truncate(text, columns)
   end
   local visible = take(text, columns - 1)
   return visible .. "…", #visible
+end
+
+local function history_preview(model, columns)
+  local items, selected = model.history_items, model.history_selected
+  local count = math.min(#items, model.history_max_visible)
+  local first, last, budget
+  -- Keep the active entry in view; reduce the window on narrow screens before
+  -- truncating individual suffixes. The ASCII dots indicate hidden entries,
+  -- while the Unicode ellipsis produced by truncate() shortens one entry.
+  while count > 0 do
+    first = math.max(1, math.min(selected - math.floor(count / 2), #items - count + 1))
+    last = first + count - 1
+    budget = columns - 4 - (count - 1) * 3 - (first > 1 and 6 or 0) - (last < #items and 6 or 0)
+    if budget >= count * 4 or count == 1 then
+      break
+    end
+    count = count - 1
+  end
+  if budget < 1 then
+    local text = truncate(items[selected].text:sub(#model.text + 1), columns)
+    return text, 0, #text
+  end
+  local text = first > 1 and "{ ... | " or "{ "
+  local start, finish
+  for index = first, last do
+    local suffix = truncate(items[index].text:sub(#model.text + 1), math.floor(budget / (last - index + 1)))
+    if index == selected then
+      start, finish = #text, #text + #suffix
+    end
+    text = text .. suffix
+    budget = budget - width(suffix)
+    if index < last then
+      text = text .. " | "
+    end
+  end
+  return text .. (last < #items and " | ... }" or " }"), start, finish
 end
 
 local function mark(row, start, finish, group, extra)
@@ -238,7 +275,12 @@ function M.render(model, config)
     offset = offset + #char
   end
   local visible = take(text:sub(offset + 1), available)
-  local ghost = model.ghost and take(clean(model.ghost), math.max(0, available - width(visible))) or ""
+  local remaining = math.max(0, available - width(visible))
+  local ghost = model.ghost and take(clean(model.ghost), remaining) or ""
+  local history_start, history_end
+  if model.selected == 0 and model.ghost and #model.history_items > 0 then
+    ghost, history_start, history_end = history_preview(model, remaining)
+  end
   local prompt_row = #lines
   lines[#lines + 1] = prefix .. visible .. ghost .. " "
   vim.bo[state.buf].modifiable = true
@@ -267,7 +309,16 @@ function M.render(model, config)
     end
   end
   mark(prompt_row, 0, #prefix, model.shell and "SuggestionsShellAccent" or "SuggestionsAccent")
-  mark(prompt_row, #prefix + #visible, #prefix + #visible + #ghost, "SuggestionsGhost")
+  mark(prompt_row, #prefix + #visible, #prefix + #visible + #ghost, "SuggestionsGhost", { priority = 100 })
+  if history_start then
+    mark(
+      prompt_row,
+      #prefix + #visible + history_start,
+      #prefix + #visible + history_end,
+      "SuggestionsHistorySelected",
+      { priority = 150 }
+    )
+  end
   local cursor = #prefix + math.max(0, pos - offset)
   api.nvim_win_set_cursor(state.win, { prompt_row + 1, cursor })
   api.nvim_win_call(state.win, function()

@@ -276,7 +276,7 @@ class Integration(unittest.TestCase):
           for c = 1, vim.o.columns do result = result .. vim.fn.screenstring(vim.o.lines, c) end
           return result
         """)
-        self.assertIn("!git status --branch", text)
+        self.assertIn("!git st{ atus --branch | atus --short }", text)
         info = self.nvim.funcs.getwininfo(self.inspect()["ui"]["win"])[0]
         self.assertEqual(info["topline"], 1)
         events = [
@@ -330,6 +330,246 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.line(), command)
         self.assertEqual(self.nvim.funcs.getcmdpos(), len(command.encode()) + 1)
         self.assertEqual(self.nvim.funcs.exists("g:suggestions_prediction"), 0)
+
+    def history_prompt(self):
+        return self.nvim.api.buf_get_lines(self.inspect()["ui"]["buf"], -2, -1, False)[
+            0
+        ]
+
+    def test_inline_history_window_navigation_and_panel_handoff(self):
+        for index in range(5, 0, -1):
+            self.nvim.funcs.histadd(":", f"set number {index}")
+        self.enter(":set nu", "number")
+        self.assertIn("set nu{ mber 1 | mber 2 | mber 3 | ... }", self.history_prompt())
+        self.assertGreater(self.inspect()["ui"]["height"], 3)
+        self.assertEqual(self.current()["selected"], 0)
+        self.key("<C-n><C-n>")
+        self.assertEqual(self.line(), "set nu")
+        self.assertEqual(self.current()["ghost"], "mber 3")
+        self.assertIn("{ ... | mber 2 | mber 3 | mber 4 | ... }", self.history_prompt())
+        self.key("<C-n><C-n>")
+        self.assertIn("{ ... | mber 3 | mber 4 | mber 5 }", self.history_prompt())
+        self.key("<C-n>")
+        self.assertEqual(self.current()["ghost"], "mber 1")
+        self.key("<C-p>")
+        self.assertEqual(self.current()["ghost"], "mber 5")
+        self.key("<Tab>")
+        total = len(self.current()["items"])
+        self.assertEqual(self.current()["selected"], 1)
+        self.assertNotIn("{", self.history_prompt())
+        for key, selected in (
+            ("<Tab>", 2 % (total + 1)),
+            ("<S-Tab>", 1),
+            ("<S-Tab>", 0),
+            ("<S-Tab>", total),
+        ):
+            self.key(key)
+            self.assertEqual(self.current()["selected"], selected)
+            self.assertEqual(self.line(), "set nu")
+        expected = self.current()["items"][total - 1]["text"]
+        self.key("<CR>")
+        self.assertEqual(self.line(), expected)
+        self.assert_completion_closed()
+        self.assertNotIn("{", self.history_prompt())
+
+    def test_inline_history_panel_returns_to_unselected(self):
+        self.configure_fuzzy()
+        self.addCleanup(self.configure_fuzzy)
+        self.nvim.exec_lua("""
+          local backend = require('suggestions.backend')
+          backend.remember('sg-test --beta old')
+          backend.remember('sg-test --alpha recent')
+        """)
+        self.enter(":!sg-test --", "--gamma")
+        self.key("<C-n>")
+        self.assertEqual(self.current()["ghost"], "beta old")
+        items = self.current()["items"]
+        height = self.inspect()["ui"]["height"]
+        for enter, leave, selected in (
+            ("<Tab>", "<S-Tab>", 1),
+            ("<S-Tab>", "<Tab>", 3),
+            ("<Tab>", "<C-p>", 1),
+            ("<S-Tab>", "<C-n>", 3),
+        ):
+            with self.subTest(enter=enter, leave=leave):
+                self.key(enter)
+                self.assertEqual(self.current()["selected"], selected)
+                self.assertNotIn("{", self.history_prompt())
+                self.key(leave)
+                self.assertEqual(self.current()["selected"], 0)
+                self.assertEqual(self.current()["ghost"], "beta old")
+                self.assertIn("{ alpha recent | beta old }", self.history_prompt())
+                self.assertEqual(self.current()["items"], items)
+                self.assertEqual(self.inspect()["ui"]["height"], height)
+                self.assertEqual(self.line(), "!sg-test --")
+                self.key("<C-p>")
+                self.assertEqual(self.current()["selected"], 0)
+                self.assertEqual(self.current()["ghost"], "alpha recent")
+                self.key("<C-n>")
+                self.assertEqual(self.current()["ghost"], "beta old")
+        self.key("<CR>")
+        self.assertEqual(self.line(), "!sg-test --beta old")
+        self.assert_completion_closed()
+
+    def test_inline_history_single_candidate_returns_to_history(self):
+        self.configure_fuzzy(completion={"auto": False, "max_results": 1})
+        self.addCleanup(self.configure_fuzzy)
+        self.nvim.funcs.histadd(":", "set number norelativenumber")
+        self.enter(":set nu")
+        self.key("<Tab>")
+        self.wait_for(lambda: self.current()["selected"] == 1)
+        self.assertEqual(len(self.current()["items"]), 1)
+        self.key("<S-Tab>")
+        self.assertEqual(self.current()["selected"], 0)
+        self.assertEqual(self.current()["ghost"], "mber norelativenumber")
+        self.assertFalse(self.current()["history_explicit"])
+        self.key("<S-Tab><Tab>")
+        self.assertEqual(self.current()["selected"], 0)
+        self.assertIn("{ mber norelativenumber }", self.history_prompt())
+        self.key("<Right>")
+        self.assertEqual(self.line(), "set number norelativenumber")
+
+    def test_inline_history_explicit_confirmation_and_reset(self):
+        for value in (2, 1):
+            self.nvim.funcs.histadd(":", f"let g:sg_inline = {value}")
+        self.enter(":let g:sg_inline = ")
+        self.key("<C-n>")
+        self.assertEqual(self.current()["ghost"], "2")
+        self.key("<CR>")
+        self.assertEqual(self.line(), "let g:sg_inline = 2")
+        self.assertNotIn("sg_inline", self.nvim.vars)
+        self.assert_completion_closed()
+        self.key("<CR>")
+        self.assertEqual(self.nvim.vars["sg_inline"], 2)
+        self.enter(":let g:sg_inline = ")
+        self.key("<C-n><Left>")
+        self.assertFalse(self.current().get("history_items"))
+        self.assertFalse(self.current().get("history_explicit"))
+        self.assertNotIn("{", self.history_prompt())
+        self.key("<C-e>")
+        self.assertEqual(self.current()["history_selected"], 1)
+        self.key("<C-n><C-u>")
+        self.assertFalse(self.current().get("history_items"))
+
+    def test_inline_history_configured_count_and_manual_completion(self):
+        self.configure_fuzzy(completion={"auto": False}, history={"max_visible": 1})
+        self.addCleanup(self.configure_fuzzy)
+        for value in ("three", "two", "one"):
+            self.nvim.funcs.histadd(":", "set number " + value)
+        self.nvim.funcs.histadd(":", "set nu")
+        self.nvim.funcs.histadd(":", "set number\necho 'skip'")
+        self.enter(":set nu")
+        self.assertFalse(self.current()["items"])
+        self.assertEqual(len(self.current()["history_items"]), 3)
+        self.assertIn("{ mber one | ... }", self.history_prompt())
+        self.key("<C-n>")
+        self.assertIn("{ ... | mber two | ... }", self.history_prompt())
+        self.key("<C-n>")
+        self.assertIn("{ ... | mber three }", self.history_prompt())
+        self.key("<Right>")
+        self.assertEqual(self.line(), "set number three")
+
+    def test_inline_history_shell_filters_and_preserves_async_selection(self):
+        self.configure_fuzzy()
+        self.addCleanup(self.configure_fuzzy)
+        self.nvim.exec_lua(
+            r"""
+          local backend = require('suggestions.backend')
+          for _, entry in ipairs({ 'sg-slow second', 'sg-slow first',
+              'sg-slow first', 'sg-slow ', 'sg-slow multi\nline' }) do
+            backend.remember(entry)
+          end
+        """
+        )
+        self.enter(":!sg-slow ")
+        self.assertEqual(len(self.current()["history_items"]), 2)
+        self.key("<C-n>")
+        self.assertEqual(self.current()["ghost"], "second")
+        self.wait_for(lambda: self.current().get("items"), "async shell candidates")
+        self.assertEqual(self.current()["ghost"], "second")
+        self.assertEqual(self.current()["selected"], 0)
+        self.key("<Right>")
+        self.assertEqual(self.line(), "!sg-slow second")
+
+    def test_inline_history_shell_input_and_search_panel(self):
+        self.configure_input({"enabled": True, "completion": "shell"})
+        self.addCleanup(self.configure_fuzzy)
+        self.backend("git st")
+        self.enter_input(default="git st")
+        self.wait_for(lambda: self.current().get("items"))
+        self.assertIn("{ atus --branch | atus --short }", self.history_prompt())
+        self.key("<C-n><CR>")
+        self.assertEqual(self.line(), "git status --short")
+        self.assertFalse(self.nvim.exec_lua("return _G.sg_input_done"))
+        self.assert_completion_closed()
+        self.key("<CR>")
+        self.wait_for(lambda: self.nvim.exec_lua("return _G.sg_input_done"))
+        self.assertEqual(
+            self.nvim.exec_lua("return _G.sg_input_result"), "git status --short"
+        )
+        self.nvim.current.buffer[:] = ["alpha alpine albatross"]
+        self.enter("/al", "alpha")
+        self.assertFalse(self.current().get("history_items"))
+        self.key("<Tab><C-n>")
+        self.assertEqual(self.current()["selected"], 2)
+        self.key("<C-p>")
+        self.assertEqual(self.current()["selected"], 1)
+
+    def test_inline_history_unicode_resize_and_selected_highlight(self):
+        for value in ("戊", "丁", "丙", "乙", "甲"):
+            self.nvim.funcs.histadd(":", "echo " + value * 20)
+        self.enter(":echo ")
+        self.key("<C-n>")
+        self.nvim.ui_try_resize(46, 32)
+        self.addCleanup(self.nvim.ui_try_resize, 100, 32)
+        self.wait_for(lambda: self.nvim.options["columns"] == 46)
+        self.key("")
+        prompt = self.history_prompt()
+        self.assertLess(self.nvim.funcs.strdisplaywidth(prompt), 47)
+        self.assertIn("...", prompt)
+        self.assertIn("…", prompt)
+        marked = self.nvim.exec_lua("""
+          local buf = require('suggestions').inspect().ui.buf
+          local ns = vim.api.nvim_get_namespaces()['suggestions.render']
+          for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })) do
+            if mark[4].hl_group == 'SuggestionsHistorySelected' then
+              local line = vim.api.nvim_buf_get_lines(buf, mark[2], mark[2] + 1, false)[1]
+              return line:sub(mark[3] + 1, mark[4].end_col)
+            end
+          end
+        """)
+        self.assertTrue(marked.startswith("乙"), marked)
+        self.assertNotIn("|", marked)
+        self.assertNotIn("...", marked)
+        screen = self.screen()
+        selected = next(
+            screen.highlights[hl] for char, hl in screen.cells[-1] if char == "乙"
+        )
+        colors = self.nvim.api.get_hl(0, {"name": "SuggestionsHistorySelected"})
+        self.assertEqual(selected["foreground"], colors["fg"])
+        self.assertEqual(selected["background"], colors["bg"])
+        self.key("<Right>")
+        self.assertEqual(self.line(), "echo " + "乙" * 20)
+
+    def test_inline_history_word_accept_keeps_chosen_entry(self):
+        for entry in ("set number relativenumber", "set number norelativenumber"):
+            self.nvim.funcs.histadd(":", entry)
+        self.enter(":set nu", "number")
+        self.key("<C-n><M-f>")
+        self.assertEqual(self.line(), "set number ")
+        self.assertEqual(self.current()["ghost"], "relativenumber")
+        self.key("<Right>")
+        self.assertEqual(self.line(), "set number relativenumber")
+
+    def test_inline_history_invalid_configuration(self):
+        for value in (0, -1, 1.5, "3", False):
+            with self.subTest(value=value):
+                ok, error = self.nvim.exec_lua(
+                    "return {pcall(require('suggestions.config').resolve, {history = {max_visible = ...}})}",
+                    value,
+                )
+                self.assertFalse(ok)
+                self.assertIn("history.max_visible", error)
 
     def test_ex_history_tracks_native_execution_and_deletion(self):
         command = "let g:suggestions_session_history = 42"
@@ -663,7 +903,7 @@ class Integration(unittest.TestCase):
         for key, selected in (
             ("<Tab>", 2),
             ("<C-n>", 3),
-            ("<Tab>", 1),
+            ("<Tab>", 0),
             ("<C-p>", 3),
             ("<S-Tab>", 2),
             ("<C-p>", 1),
@@ -749,6 +989,8 @@ class Integration(unittest.TestCase):
         self.enter(":set number", "number")
         self.key("<S-Tab>")
         self.assertEqual(self.current()["selected"], len(self.current()["items"]))
+        self.key("<Tab>")
+        self.assertEqual(self.current()["selected"], 0)
         self.key("<Tab><CR>")
         self.assertEqual(self.line(), "set number")
         self.assert_completion_closed()
@@ -935,13 +1177,14 @@ class Integration(unittest.TestCase):
         self.assertFalse(self.inspect()["backend"]["running"])
         self.assertTrue(self.backend("sg-test --a"))
 
-    def configure_fuzzy(self, options=None, completion=None, keys=None):
+    def configure_fuzzy(self, options=None, completion=None, keys=None, history=None):
         self.nvim.exec_lua(
             """
             require('suggestions').setup({
               fuzzy = select(1, ...), completion = select(2, ...),
               zsh = { env = { ZDOTDIR = select(3, ...) }, history_file = select(4, ...) },
               keys = select(5, ...),
+              history = select(6, ...),
             })
             """,
             options or {},
@@ -949,6 +1192,7 @@ class Integration(unittest.TestCase):
             str(self.folder),
             str(self.folder / "history"),
             keys or {},
+            history or {},
         )
 
     def configure_input(self, options=None, auto=True, completion=None):
@@ -1640,9 +1884,12 @@ class Integration(unittest.TestCase):
             self.configure_fuzzy()
             self.assertEqual(
                 self.nvim.funcs.maparg("<C-n>", "c", False, True)["desc"],
-                "original C-n mapping",
+                "suggestions.nvim: suggestion_next",
             )
-            self.assertFalse(self.nvim.funcs.maparg("<C-p>", "c", False, True))
+            self.assertEqual(
+                self.nvim.funcs.maparg("<C-p>", "c", False, True)["desc"],
+                "suggestions.nvim: suggestion_previous",
+            )
         finally:
             self.key("<C-c>")
             self.nvim.exec_lua("""

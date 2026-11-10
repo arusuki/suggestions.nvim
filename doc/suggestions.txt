@@ -27,6 +27,29 @@ Ex history uses Neovim's loaded history (including ShaDa and this session),
 respects 'history' and histdel(), and skips multiline entries. Up/Down keep
 native Ex history navigation when no completion is selected.
 
+History matches appear inline as suffixes: { one | two | three | ... }.
+C-n/C-p cycles through them without changing the input. The active suffix is
+highlighted with SuggestionsHistorySelected. Leading/trailing ... means more
+entries exist in that direction; the markers are never selectable or inserted.
+history.max_visible (default 3) limits the visible entries, not navigation.
+Narrow windows show fewer entries or truncate suffixes with a Unicode ellipsis;
+if the braces cannot fit, only the active suffix is shown. Entries are newest
+first, deduplicated, and exclude exact-input and multiline history.
+
+The automatic completion panel remains open, initially without a selection.
+Tab cycles: unselected -> first -> ... -> last -> unselected; S-Tab reverses it.
+S-Tab on the first item or Tab on the last restores the previous history
+preview without closing the panel. C-n/C-p navigates panel candidates while
+one is selected, passes through the same unselected state at boundaries, then
+resumes history navigation. Selected panel candidates take preview priority.
+With no history or panel selection, C-n/C-p keeps native behavior.
+Right/Ctrl-e accepts the active history entry; Alt-f accepts one word.
+After C-n/C-p explicitly navigates history, Enter confirms that entry, hides
+suggestions, and waits for another Enter to execute. The initially highlighted
+history entry alone does not change Enter's execution behavior.
+This also works in shell-enabled input prompts. With completion.auto=false,
+history still appears but Tab is needed to request completion candidates.
+
 The native command line remains active: Ex ranges, substitutions, registers,
 search and nested expression prompts retain Neovim semantics. :! executes
 through 'shell' and 'shellcmdflag', independently of the completion backend.
@@ -39,6 +62,7 @@ CONFIGURATION                                           *suggestions-config*
         auto = true, debounce_ms = 70, max_results = 80,
         empty = 'none', history_limit = 10,
       },
+      history = { max_visible = 3 },
       input = { enabled = false, completion = 'native', rules = {} },
       fuzzy = {
         enabled = true, executable = 'fzf', timeout_ms = 2000,
@@ -57,10 +81,13 @@ Each keys action accepts a string, a list of strings, or false to disable it.
 Lists replace the default binding; include it explicitly to keep it:
 >lua
     keys = {
-      next = { '<Tab>', '<C-n>' },
-      previous = { '<S-Tab>', '<C-p>' },
+      accept = { '<Right>', '<C-y>' },
+      suggestion_next = '<C-n>',
+      suggestion_previous = '<C-p>',
     }
 <
+Explicit bindings override other actions' defaults. Mapping C-n/C-p to
+next/previous makes them always select completion panel candidates.
 Full defaults are in lua/suggestions/config.lua.
 Startup files supply compdef, fpath and aliases.
 Zsh history is loaded at worker startup; session commands stay in memory. The
@@ -186,7 +213,8 @@ HIGHLIGHTS                                           *suggestions-highlights*
 
 SuggestionsNormal       Drawer surface, derived from Normal.
 SuggestionsMuted        Secondary labels and hints.
-SuggestionsGhost        Inline predicted suffix.
+SuggestionsGhost        Inline predicted suffix and history alternatives.
+SuggestionsHistorySelected Active inline history suffix.
 SuggestionsBorder       Top separator.
 SuggestionsAccent       Prompt.
 SuggestionsShellAccent  Shell prompt, theme-blended pink by default.

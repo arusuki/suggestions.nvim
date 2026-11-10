@@ -47,15 +47,16 @@ require("suggestions").setup()
 | `→` | 行末采纳灰字；有显式选中候选时采纳该项；否则移动光标 |
 | `Alt-f` | 按词采纳灰字；否则向前移动一个词 |
 | `Alt-b` | 向后移动一个词 |
-| `Tab` / `Shift-Tab` | 选择下一个 / 上一个候选，循环选择 |
+| `Tab` / `Shift-Tab` | 进入补全面板，向后 / 向前循环选择候选 |
+| `Ctrl-n` / `Ctrl-p` | 向后 / 向前循环选择行内历史；面板已有选中项时导航面板 |
 | `↑` / `↓` | 按输入前缀翻阅 zsh 历史；选中候选后改为移动选择 |
-| `Enter` | 确认显式选中的候选；没有选择时执行当前输入 |
+| `Enter` | 确认手动切换过的历史或面板选中项；没有选择时执行当前输入 |
 | `Ctrl-a` / `Ctrl-e` | 行首 / 行尾；行末有灰字时 `Ctrl-e` 采纳它 |
 | `Ctrl-k` | 删除光标到行尾的内容 |
 | `Ctrl-u` / `Ctrl-w` | Neovim 原生的向前删行 / 删词 |
 | `Esc` / `Ctrl-c` | 取消命令，收起面板 |
 
-自动出现的候选不会被预选。输入完整命令后，直接回车即可执行，未采纳的灰字不会被执行。
+自动出现的补全候选不会被预选，默认高亮的历史也只是预览。未主动选择时，Enter 只执行当前输入；使用 Ctrl-n / Ctrl-p 切换过历史后，Enter 先确认该条，再按 Enter 执行。
 
 按 Enter 确认候选后，候选列表和灰字会收起，直到继续编辑输入（例如输入空格）才恢复。仅移动光标不会重新弹出补全。也可以按 Tab / Shift-Tab 主动请求候选；直接再按 Enter 则执行已确认的输入。
 
@@ -64,6 +65,19 @@ require("suggestions").setup()
 灰字只在非空命令的行末显示，搜索和嵌套表达式提示不显示灰字。Ex 历史直接使用 Neovim 已加载的历史（含 ShaDa 和当前会话），遵循 `'history'` 设置和原生历史删除操作；多行历史不用于灰字。未选中候选时，Ex 的 `↑` / `↓` 保留原生历史导航。设置 `completion.auto = false` 后，Ex 历史灰字仍会显示，补全需按 Tab 请求。
 
 `!cmd`、`2,4!cmd`、`read !cmd`、`write !cmd` 可使用 zsh 补全。候选保留 zsh 生成的引号、空格转义、目录斜杠和光标右侧文本；补全以发起命令的窗口工作目录为准，支持 `:lcd`。
+
+### 多条历史预测
+
+历史命中时，输入末尾显示可追加的后缀，例如：
+
+```text
+:!git st{ atus --branch | atus --short | ash | ... }
+:!git st{ ... | atus --short | ash | ash pop | ... }
+```
+
+当前项使用 `SuggestionsHistorySelected` 高亮。历史按最近使用顺序去重，跳过相同输入和多行记录；Ctrl-n / Ctrl-p 循环切换，不修改输入。前后的 `...` 表示该方向还有未显示的历史，不可选中，也不会写入命令。`history.max_visible` 控制同时显示的条数，默认 3；它不限制可导航的历史总数，也不影响空输入的 `completion.history_limit`。窄窗口会减少显示条数或用 `…` 截短单条内容；空间不足以显示括号时，仅显示当前后缀。
+
+自动补全面板同时展开，初始没有选中项。Tab 按「未选中 → 第一项 → … → 最后一项 → 未选中」循环，Shift-Tab 反向循环。从第一项按 Shift-Tab 或从最后一项按 Tab 会取消面板选择，恢复之前的历史预览，面板保持展开。进入面板选择后，Ctrl-n / Ctrl-p 也导航面板，行内预览以面板选中项为准；Ctrl-n / Ctrl-p 在面板首尾同样经过未选中状态，回到未选中后重新导航历史。没有历史且未选中面板项时，Ctrl-n / Ctrl-p 保留原生行为。Right / 行末 Ctrl-e 采纳当前历史，Alt-f 按词采纳；输入编辑后重新匹配。此行为也适用于启用了 shell 补全的 input 提示。`completion.auto = false` 仍需 Tab 请求补全面板。
 
 ## 配置
 
@@ -98,6 +112,7 @@ require("suggestions").setup({
     empty = "none",   -- 空输入不提示；设为 "history" 时只显示历史
     history_limit = 10, -- 空输入最多展示的历史条数
   },
+  history = { max_visible = 3 }, -- 同时显示的行内历史条数
   input = {
     enabled = false, -- 是否为 input() 提供 suggestions 补全
     completion = "native",
@@ -133,11 +148,14 @@ require("suggestions").setup({
 ```lua
 require("suggestions").setup({
   keys = {
-    next = { "<Tab>", "<C-n>" },
-    previous = { "<S-Tab>", "<C-p>" },
+    accept = { "<Right>", "<C-y>" },
+    suggestion_next = "<C-n>",
+    suggestion_previous = "<C-p>",
   },
 })
 ```
+
+显式配置的快捷键优先于其他动作的默认绑定。若将 Ctrl-n / Ctrl-p 配给 `next` / `previous`，它们会始终导航补全面板。
 
 空输入（包括只有空白字符、`:!` 后尚未输入命令，以及启用补全的 input 提示）默认不显示候选或灰字，按 Tab 也不会请求普通补全。已经输入命令后的参数补全（如 `:edit `、`:!ls `）不受影响。
 
@@ -187,7 +205,7 @@ vim.opt.shellcmdflag = "-ic"
 
 这仍是 `:!` 的一次性命令执行，不是持久化终端会话；`!cd` 不改变 Neovim 的目录。交互式 TUI 程序使用 `:terminal`。
 
-可覆盖以下高亮组：`SuggestionsNormal`、`SuggestionsMuted`、`SuggestionsGhost`、`SuggestionsBorder`、`SuggestionsAccent`、`SuggestionsSelection`。默认配色取自当前主题，并在 `ColorScheme` 后重新适配。
+可覆盖以下高亮组：`SuggestionsNormal`、`SuggestionsMuted`、`SuggestionsGhost`、`SuggestionsHistorySelected`、`SuggestionsBorder`、`SuggestionsAccent`、`SuggestionsSelection`。默认配色取自当前主题，并在 `ColorScheme` 后重新适配。
 
 Shell 输入（`:!`、过滤命令及配置为 shell 补全的 input 提示）的提示符和顶部分隔线默认使用柔和的淡粉色。颜色会混合当前主题的前景与背景；浅色主题使用更深的玫瑰色保持可读性，切换主题后自动重新适配。通过 `highlights.shell` 可同时配置这两处的颜色及其他 `nvim_set_hl` 属性，设置后会在切换主题时保留：
 

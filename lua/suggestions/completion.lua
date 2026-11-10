@@ -16,9 +16,10 @@ function M.shell_prefix(line)
   end
 end
 
-function M.ex_history(prefix)
+function M.ex_histories(prefix)
+  local entries, seen = {}, {}
   if prefix == "" then
-    return nil
+    return entries
   end
   -- Read native history directly: this includes ShaDa and the current session,
   -- and respects histdel() and 'history' without a second cache.
@@ -27,10 +28,16 @@ function M.ex_history(prefix)
     if entry == "" then
       break
     end
-    if #entry > #prefix and entry:sub(1, #prefix) == prefix and not entry:find("[\r\n]") then
-      return entry
+    if #entry > #prefix and entry:sub(1, #prefix) == prefix and not entry:find("[\r\n]") and not seen[entry] then
+      seen[entry] = true
+      entries[#entries + 1] = entry
     end
   end
+  return entries
+end
+
+function M.ex_history(prefix)
+  return M.ex_histories(prefix)[1]
 end
 
 function M.history(kind, limit)
